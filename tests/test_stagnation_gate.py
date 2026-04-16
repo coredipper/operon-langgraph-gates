@@ -103,6 +103,58 @@ def test_certificates_empty_on_healthy_run() -> None:
     assert gate.certificates == []
 
 
+async def test_wrap_handles_async_fn() -> None:
+    gate = _make_gate()
+
+    async def afn(state: dict[str, object]) -> dict[str, str]:
+        return {"answer": "same response every turn"}
+
+    wrapped = gate.wrap(afn)
+    for _ in range(6):
+        out = await wrapped({"input": "q"})
+        assert out == {"answer": "same response every turn"}
+    assert gate.is_stagnant is True
+
+
+def test_wrap_forwards_extra_args_to_fn() -> None:
+    gate = _make_gate()
+    received: list[object] = []
+
+    def fn(state: dict[str, object], config: object) -> dict[str, str]:
+        received.append(config)
+        return {"answer": "x"}
+
+    wrapped = gate.wrap(fn)
+    wrapped({"q": "q"}, {"thread_id": "A"})
+    assert received == [{"thread_id": "A"}]
+
+
+def test_edge_routes_per_thread() -> None:
+    gate = _make_gate()
+    wrapped = gate.wrap(lambda state, config=None: {"answer": "same response every turn"})
+    cfg_a = {"configurable": {"thread_id": "A"}}
+    cfg_b = {"configurable": {"thread_id": "B"}}
+    edge = gate.edge(forward="answer", break_to="escalate")
+
+    for _ in range(6):
+        wrapped({"q": "q"}, cfg_a)
+
+    # Thread A is stagnant; thread B has never run and must stay healthy.
+    assert edge({}, cfg_a) == "escalate"
+    assert edge({}, cfg_b) == "answer"
+
+
+def test_reset_clears_stagnation() -> None:
+    gate = _make_gate()
+    wrapped = gate.wrap(lambda state: {"answer": "same response every turn"})
+    for _ in range(6):
+        wrapped({"q": "q"})
+    assert gate.is_stagnant is True
+    gate.reset()
+    assert gate.is_stagnant is False
+    assert gate.certificates == []
+
+
 def test_text_extractor_used_when_provided() -> None:
     gate = _make_gate()
     responses = iter(_DIVERSE_RESPONSES)
