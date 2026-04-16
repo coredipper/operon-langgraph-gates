@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from copy import deepcopy
 from pathlib import Path
 from textwrap import dedent
 
@@ -356,14 +357,9 @@ NB2_CELLS = [
 def _write(path: Path, cells: list[nbformat.NotebookNode], id_prefix: str) -> None:
     _assign_stable_ids(cells, id_prefix)
     nb = new_notebook(cells=cells)
-    nb["metadata"] = {
-        "kernelspec": {
-            "display_name": "Python 3",
-            "language": "python",
-            "name": "python3",
-        },
-        "language_info": {"name": "python"},
-    }
+    # Deep copy so nested dicts in _CANONICAL_NB_METADATA are never shared
+    # between source-only writes and executed-then-normalized writes.
+    nb["metadata"] = deepcopy(_CANONICAL_NB_METADATA)
     # Sort keys so regenerated notebooks are diff-friendly.
     path.write_text(json.dumps(nb, indent=1, sort_keys=True) + "\n")
     print(f"wrote {path.relative_to(ROOT)}")
@@ -402,23 +398,21 @@ def _normalize_notebook(data: dict[str, object]) -> None:
         meta = cell.get("metadata", {})
         if "execution" in meta:
             del meta["execution"]
-    data["metadata"] = dict(_CANONICAL_NB_METADATA)
+    # Deep copy so nested dicts in _CANONICAL_NB_METADATA are never shared
+    # with this notebook instance — later mutations through ``data`` won't
+    # leak back into the module-level constant.
+    data["metadata"] = deepcopy(_CANONICAL_NB_METADATA)
 
 
 def _strip_execution_timestamps(path: Path) -> None:
     """Public wrapper retained for compatibility with pre-existing docs.
 
-    Delegates to :func:`_normalize_notebook` so both the cell-level
-    timestamps and the top-level kernel metadata are scrubbed together.
+    Delegates to :func:`_normalize_notebook`; the deep copy lives in the
+    normalizer itself so all callers — not only this one — get the same
+    isolation from the module-level canonical constant.
     """
-    from copy import deepcopy
-
     data = json.loads(path.read_text())
     _normalize_notebook(data)
-    # Defensive deep-copy in case _normalize_notebook was handed the module
-    # constant by reference in some future caller; keeps nested dicts
-    # decoupled between source-only writes and executed writes.
-    data["metadata"] = deepcopy(data["metadata"])
     path.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
 
 
