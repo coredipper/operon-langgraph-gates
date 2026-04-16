@@ -50,7 +50,7 @@ checkpointer = IntegrityGate.wrap(
 graph = workflow.compile(checkpointer=checkpointer)
 ```
 
-Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): the FULL integrity variant detects and repairs **100%** of injected state-corruption sites (vs 0% for RAW and GUARDED variants). [Paper 5 §3](https://github.com/coredipper/operon/blob/main/article/paper5/main.pdf) proves the certificate is preserved under compilation. See [`docs/paper-citations.md`](./docs/paper-citations.md) for verbatim quotes and the honest caveat: this gate is a LangGraph reformulation of the paper's idea, not a direct reuse of `DNARepair`.
+Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): *in the paper's setup*, the FULL variant (with `DNARepair`) achieves 100% detection and 100% repair of injected state corruption, vs 0%/0% for RAW and GUARDED. **This package is detection-and-certification only — it does not repair state.** It reformulates the idea as a LangGraph-native invariant gate. [Paper 5 §3](https://github.com/coredipper/operon/blob/main/article/paper5/main.pdf) establishes the preservation-under-compilation framework that the gate's certificate follows. See [`docs/paper-citations.md`](./docs/paper-citations.md) for verbatim quotes and the honest caveat.
 
 ## Examples
 

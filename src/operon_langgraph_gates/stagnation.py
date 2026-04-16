@@ -11,10 +11,11 @@ Outcome". With real sentence embeddings (all-MiniLM-L6-v2, N = 3 seeds
   here, so the strength of this gate is in convergence/false-stagnation
   rather than loop detection per se)
 
-Authoritative source for these numbers:
-``/Users/bogdan/core/operon/eval/results/benchmarks_real_embeddings/multi_model_summary.json``
-(commit ``339875e``). A full citation record with verbatim paper quotes
-and reproduction commands is at ``docs/paper-citations.md``.
+Authoritative source for these numbers (path relative to the Operon
+repo root, commit ``339875e``):
+``eval/results/benchmarks_real_embeddings/multi_model_summary.json`` at
+``github.com/coredipper/operon``. A full citation record with verbatim
+paper quotes and reproduction commands is at ``docs/paper-citations.md``.
 
 In practice the gate is effective at breaking stuck loops (see
 ``tests/integration/test_loop_break.py``) because most real-world

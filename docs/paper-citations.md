@@ -1,9 +1,14 @@
 # Paper citations and reproducibility
 
-This file is the authoritative record for the benchmark numbers that
-appear in `StagnationGate` and `IntegrityGate` docstrings. Every quoted
-number in the gates' public documentation is traceable to one of the
-entries below.
+This file is the authoritative record for the **primary benchmark
+numbers** that appear in `StagnationGate` and `IntegrityGate` docstrings
+— the convergence, false-stagnation, loop accuracy figures (StagnationGate)
+and the Paper 4 §4 Table 3 detection/repair percentages (IntegrityGate).
+Secondary numbers that show up in prose (false-positive rates, naive
+baselines for specific scenarios, scope-dependent preservation counts
+like "3/3 or 5/5") are quoted from the same Paper 4 §4.3 table and
+Paper 5 §3 text cited here; their exact values live in those source
+documents rather than being re-tabled in this file.
 
 ## Authoritative data
 
