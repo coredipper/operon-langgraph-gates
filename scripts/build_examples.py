@@ -31,6 +31,14 @@ def _code(text: str) -> nbformat.NotebookNode:
     return new_code_cell(dedent(text).strip())
 
 
+def _assign_stable_ids(cells: list[nbformat.NotebookNode], prefix: str) -> None:
+    """Override ``nbformat``'s per-run random cell IDs with stable ones so
+    regenerating a notebook produces a diff only on actual content changes.
+    """
+    for idx, cell in enumerate(cells):
+        cell["id"] = f"{prefix}-{idx:02d}"
+
+
 # ---------------------------------------------------------------------------
 # 01 — Stagnation breaks a loop
 # ---------------------------------------------------------------------------
@@ -204,12 +212,15 @@ NB2_CELLS = [
         print(f"olg        : {olg.__version__}")
     """),
     _md("""
-        ## Baseline — a node silently drops a required field
+        ## Baseline — a node writes invalid values into state
 
         A three-node pipeline: `fetch` populates state, `transform` mutates
-        it, `respond` formats the final output. `transform` has a bug — on
-        this turn it forgets to keep `user_id`. Downstream `respond` sees
-        `None` and produces a broken response without any error.
+        it, `respond` formats the final output. `transform` has a bug: it
+        explicitly overwrites `user_id` with `None` and pushes `budget`
+        negative. Under LangGraph's state semantics those partial-update
+        values are then merged into the graph state, so the downstream
+        `respond` node reads the corrupted values and emits a broken
+        response without any error.
     """),
     _code("""
         from typing_extensions import TypedDict
@@ -218,7 +229,7 @@ NB2_CELLS = [
 
 
         class AppState(TypedDict, total=False):
-            user_id: str
+            user_id: str | None
             budget: int
             answer: str
 
@@ -228,8 +239,10 @@ NB2_CELLS = [
 
 
         def bad_transform(state: AppState) -> AppState:
-            # bug: drops user_id, exceeds budget
-            return {"budget": state["budget"] - 500}
+            # bug: explicitly overwrites user_id with None and exceeds budget.
+            # LangGraph merges this into the existing state, so both values
+            # become visible downstream — not a silent omission.
+            return {"user_id": None, "budget": state["budget"] - 500}
 
 
         def respond(state: AppState) -> AppState:
@@ -251,12 +264,17 @@ NB2_CELLS = [
         print(f"budget       : {result['budget']}  (should never go negative)")
     """),
     _md("""
-        ## With `IntegrityGate` — invariants fire before corruption spreads
+        ## With `IntegrityGate` — invariants fire on the node's partial output
 
-        Define two invariants. Wrap the offending node. Add a conditional
-        edge that routes to `recover` on violation. The gate emits one
-        certificate at the first failure with a frozen evidence snapshot
-        listing which invariants passed and which failed.
+        Define two invariants and wrap the offending node. The gate runs
+        the invariants against each wrapped node's **partial output**
+        (the dict returned from the node, before LangGraph merges it into
+        graph state). That scoping is deliberate: a partial update that
+        emits an invalid value is easier to pin on a specific node than
+        inspecting merged state after multiple reducers. When either
+        invariant fails, the gate flips the per-thread flag and emits a
+        `langgraph_state_integrity` certificate; the conditional edge
+        routes to `recover` instead of `respond`.
     """),
     _code("""
         from operon_langgraph_gates import IntegrityGate
@@ -331,7 +349,8 @@ NB2_CELLS = [
 ]
 
 
-def _write(path: Path, cells: list[nbformat.NotebookNode]) -> None:
+def _write(path: Path, cells: list[nbformat.NotebookNode], id_prefix: str) -> None:
+    _assign_stable_ids(cells, id_prefix)
     nb = new_notebook(cells=cells)
     nb["metadata"] = {
         "kernelspec": {
@@ -348,8 +367,8 @@ def _write(path: Path, cells: list[nbformat.NotebookNode]) -> None:
 
 def main() -> None:
     EXAMPLES.mkdir(exist_ok=True)
-    _write(EXAMPLES / "01_stagnation_breaks_loop.ipynb", NB1_CELLS)
-    _write(EXAMPLES / "02_integrity_catches_drift.ipynb", NB2_CELLS)
+    _write(EXAMPLES / "01_stagnation_breaks_loop.ipynb", NB1_CELLS, id_prefix="stagnation")
+    _write(EXAMPLES / "02_integrity_catches_drift.ipynb", NB2_CELLS, id_prefix="integrity")
 
 
 if __name__ == "__main__":
