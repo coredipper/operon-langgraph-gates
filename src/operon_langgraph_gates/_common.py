@@ -23,40 +23,29 @@ _LANGGRAPH_KWARG_NAMES: tuple[str, ...] = ("config", "runtime")
 def thread_id(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
     """Extract ``thread_id`` from a LangGraph config/runtime passed to a node.
 
-    Resolution order, most-trusted first:
+    Resolution is explicit to avoid hijack by unrelated business payloads:
 
-    1. Positional args (LangGraph invocation protocol: ``state`` plus an
-       optional ``config`` dict or ``runtime`` object).
+    1. Positional args (LangGraph invocation protocol slots: ``state`` plus
+       an optional ``config`` dict or ``runtime`` object).
     2. Known LangGraph kwarg names — ``config``, ``runtime``. Any shape
-       (dict or Runtime-like) is accepted.
-    3. Other kwargs — only *Runtime-like* objects (non-dict with a
-       ``.config`` attribute). Plain dicts here are treated as business
-       payloads and **not** interpreted as RunnableConfig, even if their
-       shape happens to match.
+       (dict RunnableConfig or Runtime-like object) is accepted.
+
+    Arbitrary kwargs are *not* scanned, so a business dict/object shaped
+    like a RunnableConfig cannot hijack per-thread routing. If a new
+    LangGraph version adds another kwarg name for config/runtime, add it
+    to :data:`_LANGGRAPH_KWARG_NAMES` rather than widening the match.
 
     Falls back to :data:`EPHEMERAL_THREAD` when no thread id is present.
     """
-    # (1) positional — LangGraph protocol slots.
     for c in args:
         tid = _extract_thread_id(c)
         if tid is not None:
             return tid
-
-    # (2) explicit LangGraph kwarg names — trust any shape.
     for name in _LANGGRAPH_KWARG_NAMES:
         if name in kwargs:
             tid = _extract_thread_id(kwargs[name])
             if tid is not None:
                 return tid
-
-    # (3) remaining kwargs — Runtime-like (non-dict with ``.config``) only.
-    for name, value in kwargs.items():
-        if name in _LANGGRAPH_KWARG_NAMES or isinstance(value, dict):
-            continue
-        tid = _extract_thread_id(value)
-        if tid is not None:
-            return tid
-
     return EPHEMERAL_THREAD
 
 

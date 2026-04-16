@@ -179,6 +179,31 @@ def test_thread_id_extracted_from_runtime_like_object() -> None:
     assert edge({}, FakeRuntime("B")) == "answer"
 
 
+def test_thread_id_ignores_business_objects_with_config_attribute() -> None:
+    """A non-LangGraph object with a ``.config`` attribute shaped like a
+    RunnableConfig must NOT hijack thread routing. Only explicit
+    ``config`` / ``runtime`` kwarg names (or positional args) are
+    scanned for thread id.
+    """
+    gate = _make_gate()
+
+    class SettingsContainer:
+        # A realistic-ish business dependency with a ``config`` attribute
+        # that happens to match the RunnableConfig shape.
+        def __init__(self) -> None:
+            self.config = {"configurable": {"thread_id": "hijacked-by-object"}}
+
+    wrapped = gate.wrap(
+        lambda state, **kw: {"answer": "same response every turn"},
+    )
+
+    for _ in range(6):
+        wrapped({"q": "q"}, settings=SettingsContainer())
+
+    assert gate.is_stagnant_for("hijacked-by-object") is False
+    assert gate.is_stagnant is True
+
+
 def test_thread_id_ignores_business_kwargs_shaped_like_config() -> None:
     """A plain-dict business kwarg that happens to contain a
     ``configurable.thread_id`` path must NOT be interpreted as LangGraph
