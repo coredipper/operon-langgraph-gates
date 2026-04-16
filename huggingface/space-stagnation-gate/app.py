@@ -19,7 +19,6 @@ import gradio as gr
 from scenarios import DEMO_DEFAULTS, SCENARIOS, Scenario
 
 from operon_langgraph_gates import StagnationGate
-from operon_langgraph_gates._common import EPHEMERAL_THREAD
 
 _REPO_URL = "https://github.com/coredipper/operon-langgraph-gates"
 _ISSUE_URL = "https://github.com/langchain-ai/langgraph/issues/6731"
@@ -47,7 +46,12 @@ def replay(
     critical_duration: int,
     window_size: int,
 ) -> tuple[list[Turn], StagnationGate]:
-    """Feed outputs turn-by-turn through a freshly-configured gate."""
+    """Feed outputs turn-by-turn through a freshly-configured gate.
+
+    Uses :meth:`StagnationGate.integrals_for` so the UI renders the exact
+    ``epiplexic_integral`` the gate's detection logic routed on — not a
+    re-derivation that could drift from the monitor's α-mixed formula.
+    """
     gate = StagnationGate(
         threshold=threshold,
         critical_duration=critical_duration,
@@ -59,10 +63,11 @@ def replay(
     turns: list[Turn] = []
     for i, out in enumerate(outputs):
         wrapped({})
-        state = gate._threads[EPHEMERAL_THREAD]
-        severity = state.severities[-1] if state.severities else 0.0
-        # Re-derive the window-mean integral the monitor just used.
-        integral = _window_integral(state, window_size)
+        integrals = gate.integrals_for()
+        integral = integrals[-1] if integrals else 0.0
+        # Severity is only used for display tone-matching; the gate's
+        # decision uses ``integral`` directly.
+        severity = 1.0 - integral
         turns.append(
             Turn(
                 index=i,
@@ -73,15 +78,6 @@ def replay(
             )
         )
     return turns, gate
-
-
-def _window_integral(state: object, window_size: int) -> float:
-    """Mean of the last ``window_size`` epiplexity readings = 1 - severity."""
-    severities = state.severities[-window_size:]  # type: ignore[attr-defined]
-    if not severities:
-        return 0.0
-    mean_severity = sum(severities) / len(severities)
-    return max(0.0, 1.0 - mean_severity)
 
 
 # ---------------------------------------------------------------------------

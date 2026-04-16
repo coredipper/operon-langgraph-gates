@@ -285,6 +285,29 @@ def test_edge_routes_per_thread() -> None:
     assert edge({}, cfg_b) == "answer"
 
 
+def test_integrals_for_records_the_value_the_gate_routed_on() -> None:
+    """``integrals_for`` must surface the exact per-turn integral the
+    detection logic compared against ``threshold`` — not a re-derivation
+    from severities that could drift once α-mixing is in play."""
+    gate = _make_gate()
+    wrapped = gate.wrap(lambda state: {"answer": "same response every turn"})
+    for _ in range(6):
+        wrapped({"q": "q"})
+    integrals = gate.integrals_for()
+    assert len(integrals) == 6, f"expected one integral per turn; got {integrals}"
+    # All values must lie in the valid epiplexity range [0, 1].
+    assert all(0.0 <= v <= 1.0 for v in integrals)
+    # The gate flipped to is_stagnant within these 6 turns, so at least
+    # critical_duration of the trailing integrals must be < threshold.
+    assert sum(1 for v in integrals[-3:] if v < 0.2) >= 2
+
+
+def test_integrals_for_is_empty_before_any_observation() -> None:
+    gate = _make_gate()
+    assert gate.integrals_for() == []
+    assert gate.integrals_for("unknown-thread") == []
+
+
 def test_reset_clears_stagnation() -> None:
     gate = _make_gate()
     wrapped = gate.wrap(lambda state: {"answer": "same response every turn"})

@@ -79,6 +79,13 @@ class _ThreadState:
 
     monitor: EpiplexityMonitor
     severities: list[float] = field(default_factory=list)
+    # ``integrals[i]`` is the ``EpiplexityResult.epiplexic_integral`` the
+    # monitor produced on turn ``i``. This is the exact signal the gate's
+    # detection logic routes on — surfacing it lets UI clients (e.g. the
+    # demo Space) render the same number the gate acted on, rather than
+    # re-deriving something that can drift (e.g. ``1 - mean(severity)``
+    # does not match the α-mixed formula once perplexity is in play).
+    integrals: list[float] = field(default_factory=list)
     certificates: list[Certificate] = field(default_factory=list)
     is_stagnant: bool = False
     low_integral_streak: int = 0
@@ -136,6 +143,21 @@ class StagnationGate:
     def certificates(self) -> list[Certificate]:
         """All certificates emitted across all threads during this gate's life."""
         return [c for s in self._threads.values() for c in s.certificates]
+
+    def integrals_for(self, thread_id_: str | None = None) -> list[float]:
+        """Per-turn ``epiplexic_integral`` values observed on a thread.
+
+        Returns the exact integral sequence the detection logic routed on,
+        so UI clients (e.g. the demo Space) can render the same number the
+        gate acted on rather than re-deriving one that may not match the
+        monitor's α-mixed formula.
+
+        ``thread_id_ is None`` returns the ephemeral thread's history —
+        matching :attr:`is_stagnant` semantics for single-thread callers.
+        """
+        key = EPHEMERAL_THREAD if thread_id_ is None else thread_id_
+        state = self._threads.get(key)
+        return list(state.integrals) if state is not None else []
 
     def reset(self, thread_id: str | None = None) -> None:
         """Reset stagnation state. ``None`` clears all threads."""
@@ -216,12 +238,16 @@ class StagnationGate:
         # ``behavioral_stability`` verify semantics).
         severity = max(0.0, min(1.0, 1.0 - float(result.epiplexity)))
         state.severities.append(severity)
+        # Record the exact integral the detection logic routes on, so
+        # callers rendering the gate's decision see the same number.
+        integral = float(result.epiplexic_integral)
+        state.integrals.append(integral)
 
         # Detect on sustained low epiplexic_integral rather than the monitor's
         # built-in status classifier, which depends on a perplexity
         # approximation that varies with text shape and can mask stagnation
         # as CONVERGING. The integral is a direct, stable signal.
-        if result.epiplexic_integral < self._threshold:
+        if integral < self._threshold:
             state.low_integral_streak += 1
         else:
             state.low_integral_streak = 0
