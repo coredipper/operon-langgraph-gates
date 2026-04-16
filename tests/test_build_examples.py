@@ -96,3 +96,129 @@ def test_integrity_example_explains_scoping(builder: object) -> None:
         if c["cell_type"] == "markdown"  # type: ignore[attr-defined]
     )
     assert "partial output" in joined.lower()
+
+
+def test_normalize_notebook_strips_cell_execution_and_kernel_noise(
+    builder: object,
+) -> None:
+    """``_normalize_notebook`` must remove both per-cell ``metadata.execution``
+    timestamps and the kernel-populated top-level metadata fields (e.g.
+    ``language_info.version``) that make executed notebooks diff per
+    Python/kernel version."""
+    polluted = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "source": "print('hi')",
+                "metadata": {
+                    "execution": {
+                        "iopub.execute_input": "2026-04-17T12:00:00.000Z",
+                        "shell.execute_reply": "2026-04-17T12:00:00.100Z",
+                    },
+                    "something_the_user_set": True,
+                },
+                "outputs": [],
+            }
+        ],
+        "metadata": {
+            "kernelspec": {"name": "python3"},
+            "language_info": {
+                "name": "python",
+                "version": "3.11.15",  # noisy — varies per machine
+                "file_extension": ".py",
+                "mimetype": "text/x-python",
+                "codemirror_mode": {"name": "ipython", "version": 3},
+            },
+            "orig_nbformat": 4,
+        },
+    }
+
+    builder._normalize_notebook(polluted)  # type: ignore[attr-defined]
+
+    # Cell-level: execution stripped, user-set metadata preserved.
+    assert "execution" not in polluted["cells"][0]["metadata"]
+    assert polluted["cells"][0]["metadata"]["something_the_user_set"] is True
+
+    # Top-level: reset to canonical whitelist; version/extension gone.
+    assert sorted(polluted["metadata"].keys()) == ["kernelspec", "language_info"]
+    assert polluted["metadata"]["language_info"] == {"name": "python"}
+    assert "version" not in polluted["metadata"]["language_info"]
+
+
+def test_execute_flag_produces_byte_identical_output(
+    tmp_path: Path, builder: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ``--execute`` workflow must be byte-for-byte idempotent: writing
+    the same notebook twice (with a stub executor that produces
+    deterministic outputs) yields the same file. Uses a monkeypatched
+    ``NotebookClient`` so this test is instant and doesn't need an
+    ipykernel."""
+    # Stub NotebookClient so .execute() just sets deterministic outputs and
+    # injects the noisy kernel metadata that _normalize_notebook should strip.
+    import sys as _sys
+    import types as _types
+
+    from nbformat.v4 import new_output
+
+    def _mk_client(nb: object, timeout: int, kernel_name: str) -> object:
+        class _StubClient:
+            def __init__(self) -> None:
+                self.nb = nb
+
+            def execute(self) -> None:
+                for cell in self.nb.cells:  # type: ignore[attr-defined]
+                    if cell["cell_type"] == "code":
+                        cell["execution_count"] = 1
+                        cell["outputs"] = [
+                            new_output("stream", name="stdout", text="ok\n"),
+                        ]
+                        cell.setdefault("metadata", {})["execution"] = {
+                            "iopub.execute_input": "ignored-timestamp",
+                        }
+                # Simulate kernel populating version fields.
+                self.nb.metadata["language_info"] = {  # type: ignore[attr-defined]
+                    "name": "python",
+                    "version": "3.11.15",
+                    "file_extension": ".py",
+                }
+
+        return _StubClient()
+
+    fake_nbclient = _types.ModuleType("nbclient")
+    fake_nbclient.NotebookClient = _mk_client  # type: ignore[attr-defined]
+    monkeypatch.setitem(_sys.modules, "nbclient", fake_nbclient)
+
+    # Redirect ROOT + EXAMPLES to a tmp dir so we don't touch the real files
+    # and the _write() relative_to(ROOT) call stays in-tree.
+    monkeypatch.setattr(builder, "ROOT", tmp_path)  # type: ignore[attr-defined]
+    monkeypatch.setattr(builder, "EXAMPLES", tmp_path)  # type: ignore[attr-defined]
+    # Stub out argparse so builder.main() doesn't see pytest's argv.
+    monkeypatch.setattr(_sys, "argv", ["build_examples.py"])
+
+    # Run twice; both outputs must be byte-identical.
+    builder.main()  # type: ignore[attr-defined]
+    _execute_all(builder, tmp_path)
+    run1 = (tmp_path / "01_stagnation_breaks_loop.ipynb").read_bytes()
+
+    builder.main()  # type: ignore[attr-defined]
+    _execute_all(builder, tmp_path)
+    run2 = (tmp_path / "01_stagnation_breaks_loop.ipynb").read_bytes()
+
+    assert run1 == run2, "regenerate-and-execute must be byte-identical"
+
+    # And verify the notebook actually has populated outputs + no timestamps.
+    import json
+
+    data = json.loads(run1)
+    code_cells = [c for c in data["cells"] if c["cell_type"] == "code"]
+    assert all(c["outputs"] for c in code_cells)
+    assert all("execution" not in c.get("metadata", {}) for c in code_cells)
+    assert data["metadata"]["language_info"] == {"name": "python"}
+
+
+def _execute_all(builder: object, tmp_path: Path) -> None:
+    for name in (
+        "01_stagnation_breaks_loop.ipynb",
+        "02_integrity_catches_drift.ipynb",
+    ):
+        builder._execute(tmp_path / name)  # type: ignore[attr-defined]

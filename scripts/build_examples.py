@@ -369,18 +369,46 @@ def _write(path: Path, cells: list[nbformat.NotebookNode], id_prefix: str) -> No
     print(f"wrote {path.relative_to(ROOT)}")
 
 
-def _strip_execution_timestamps(path: Path) -> None:
-    """Drop ``metadata.execution`` fields that nbconvert writes on each run.
+# The canonical top-level metadata that every executed notebook is reset
+# to. Kept narrow so kernel-populated fields (e.g. ``language_info.version``,
+# ``language_info.codemirror_mode``) don't produce per-machine diffs.
+_CANONICAL_NB_METADATA: dict[str, object] = {
+    "kernelspec": {
+        "display_name": "Python 3",
+        "language": "python",
+        "name": "python3",
+    },
+    "language_info": {"name": "python"},
+}
 
-    Those fields (``iopub.execute_input``, ``shell.execute_reply``, etc.) are
-    per-execution timestamps — useful at runtime, noise in version control.
-    Stripping them makes regenerate-and-execute a true no-op for git.
+
+def _normalize_notebook(data: dict[str, object]) -> None:
+    """Scrub per-run noise from a notebook dict in place.
+
+    Removes:
+    - Per-cell ``metadata.execution`` (iopub/shell timestamps written by
+      every execution).
+    - Kernel-populated top-level ``metadata`` fields beyond the canonical
+      whitelist (e.g. ``language_info.version``, ``.file_extension``).
+
+    After this, a regenerate-and-execute produces a byte-for-byte no-op
+    in git regardless of the executing Python/kernel version.
     """
-    data = json.loads(path.read_text())
-    for cell in data.get("cells", []):
+    for cell in data.get("cells", []):  # type: ignore[union-attr]
         meta = cell.get("metadata", {})
         if "execution" in meta:
             del meta["execution"]
+    data["metadata"] = dict(_CANONICAL_NB_METADATA)
+
+
+def _strip_execution_timestamps(path: Path) -> None:
+    """Public wrapper retained for compatibility with pre-existing docs.
+
+    Delegates to :func:`_normalize_notebook` so both the cell-level
+    timestamps and the top-level kernel metadata are scrubbed together.
+    """
+    data = json.loads(path.read_text())
+    _normalize_notebook(data)
     path.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
 
 
