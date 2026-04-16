@@ -1,2 +1,4 @@
 gradio==6.12.0
-operon-langgraph-gates @ git+https://github.com/coredipper/operon-langgraph-gates.git@5c2a6c0
+# Pinned to 48e41c3 (PR #3 merge) — first commit that contains
+# ``StagnationGate.integrals_for()``, which this app depends on.
+operon-langgraph-gates @ git+https://github.com/coredipper/operon-langgraph-gates.git@48e41c3
