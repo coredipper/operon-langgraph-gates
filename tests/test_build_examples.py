@@ -215,5 +215,3 @@ def test_execute_flag_produces_byte_identical_output(
     assert all(c["outputs"] for c in code_cells)
     assert all("execution" not in c.get("metadata", {}) for c in code_cells)
     assert data["metadata"]["language_info"] == {"name": "python"}
-
-

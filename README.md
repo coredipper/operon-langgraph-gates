@@ -52,6 +52,10 @@ graph = workflow.compile(checkpointer=checkpointer)
 
 Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): *in the paper's setup*, the FULL variant (with `DNARepair`) achieves 100% detection and 100% repair of injected state corruption, vs 0%/0% for RAW and GUARDED. **This package is detection-and-certification only — it does not repair state.** It reformulates the idea as a LangGraph-native invariant gate. [Paper 5 §3](https://github.com/coredipper/operon/blob/main/article/paper5/main.pdf) establishes the preservation-under-compilation framework that the gate's certificate follows. See [`docs/paper-citations.md`](./docs/paper-citations.md) for verbatim quotes and the honest caveat.
 
+## Try it — HuggingFace Space
+
+[**Operon StagnationGate Demo**](https://huggingface.co/spaces/coredipper/operon-stagnation-gate) — interactive page: pick a preset (identical, diverse, noisy, slow drift), tune the gate parameters, watch `is_stagnant` flip and the certificate appear. Deterministic text trajectories — no LLM calls.
+
 ## Examples
 
 - [`examples/01_stagnation_breaks_loop.ipynb`](./examples/01_stagnation_breaks_loop.ipynb) — reproduces issue #6731 pathology, then fixes it with a ten-line diff.
