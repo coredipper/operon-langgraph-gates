@@ -369,9 +369,13 @@ def _write(path: Path, cells: list[nbformat.NotebookNode], id_prefix: str) -> No
     print(f"wrote {path.relative_to(ROOT)}")
 
 
-# The canonical top-level metadata that every executed notebook is reset
-# to. Kept narrow so kernel-populated fields (e.g. ``language_info.version``,
-# ``language_info.codemirror_mode``) don't produce per-machine diffs.
+# The canonical top-level notebook metadata. **Single source of truth**
+# for both source-only (``_write``) and executed (``_normalize_notebook``)
+# notebooks — they must stay identical so a regenerate-then-execute is
+# byte-stable. Kept narrow so kernel-populated fields (e.g.
+# ``language_info.version``, ``.codemirror_mode``) don't cause per-machine
+# diffs. Callers deep-copy before assigning to a notebook so nested dicts
+# aren't shared across instances.
 _CANONICAL_NB_METADATA: dict[str, object] = {
     "kernelspec": {
         "display_name": "Python 3",
@@ -407,8 +411,14 @@ def _strip_execution_timestamps(path: Path) -> None:
     Delegates to :func:`_normalize_notebook` so both the cell-level
     timestamps and the top-level kernel metadata are scrubbed together.
     """
+    from copy import deepcopy
+
     data = json.loads(path.read_text())
     _normalize_notebook(data)
+    # Defensive deep-copy in case _normalize_notebook was handed the module
+    # constant by reference in some future caller; keeps nested dicts
+    # decoupled between source-only writes and executed writes.
+    data["metadata"] = deepcopy(data["metadata"])
     path.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
 
 

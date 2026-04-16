@@ -192,16 +192,17 @@ def test_execute_flag_produces_byte_identical_output(
     # and the _write() relative_to(ROOT) call stays in-tree.
     monkeypatch.setattr(builder, "ROOT", tmp_path)  # type: ignore[attr-defined]
     monkeypatch.setattr(builder, "EXAMPLES", tmp_path)  # type: ignore[attr-defined]
-    # Stub out argparse so builder.main() doesn't see pytest's argv.
-    monkeypatch.setattr(_sys, "argv", ["build_examples.py"])
+    # Stub argv to include --execute so main() actually exercises the CLI
+    # branch (not just the source-only path + a direct _execute call).
+    monkeypatch.setattr(_sys, "argv", ["build_examples.py", "--execute"])
 
-    # Run twice; both outputs must be byte-identical.
+    # Run main() twice; both outputs must be byte-identical, and the
+    # if args.execute: branch must have produced populated outputs on each
+    # run without a direct _execute_all() call here.
     builder.main()  # type: ignore[attr-defined]
-    _execute_all(builder, tmp_path)
     run1 = (tmp_path / "01_stagnation_breaks_loop.ipynb").read_bytes()
 
     builder.main()  # type: ignore[attr-defined]
-    _execute_all(builder, tmp_path)
     run2 = (tmp_path / "01_stagnation_breaks_loop.ipynb").read_bytes()
 
     assert run1 == run2, "regenerate-and-execute must be byte-identical"
@@ -216,9 +217,3 @@ def test_execute_flag_produces_byte_identical_output(
     assert data["metadata"]["language_info"] == {"name": "python"}
 
 
-def _execute_all(builder: object, tmp_path: Path) -> None:
-    for name in (
-        "01_stagnation_breaks_loop.ipynb",
-        "02_integrity_catches_drift.ipynb",
-    ):
-        builder._execute(tmp_path / name)  # type: ignore[attr-defined]
