@@ -70,5 +70,5 @@ python_version = "3.11"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["langgraph.*", "operon_ai.*"]
+module = ["langgraph", "langgraph.*", "operon_ai", "operon_ai.*"]
 ignore_missing_imports = true
