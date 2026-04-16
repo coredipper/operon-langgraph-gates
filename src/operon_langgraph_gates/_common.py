@@ -23,17 +23,16 @@ def thread_id(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
       as the ``config`` keyword argument. Its ``configurable`` inner dict
       holds ``thread_id``.
     - A ``Runtime`` object (LangGraph 1.x newer nodes) with attribute access
-      for ``.config``, which is itself a ``RunnableConfig`` dict.
+      for ``.config``, which is itself a ``RunnableConfig`` dict. Runtime may
+      arrive positionally or as any keyword (common names: ``runtime``,
+      ``config``).
 
-    Fall back to :data:`EPHEMERAL_THREAD` when no thread id is present — that
-    keeps one-shot calls (tests, simple scripts without persistence) working
-    without forcing a thread id.
+    We scan every positional arg and every kwarg value; whichever one yields
+    a ``configurable.thread_id`` wins. Fall back to :data:`EPHEMERAL_THREAD`
+    when no thread id is present — that keeps one-shot calls (tests, scripts
+    without persistence) working without forcing a thread id.
     """
-    candidates: list[Any] = list(args)
-    cfg = kwargs.get("config")
-    if cfg is not None:
-        candidates.append(cfg)
-    for c in candidates:
+    for c in (*args, *kwargs.values()):
         tid = _extract_thread_id(c)
         if tid is not None:
             return tid

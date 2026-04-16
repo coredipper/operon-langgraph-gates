@@ -138,6 +138,11 @@ class StagnationGate:
         def sync_wrapped(state: _NodeIn, *args: Any, **kwargs: Any) -> _NodeOut:
             output = fn(state, *args, **kwargs)
             if inspect.isawaitable(output):
+                # Close the coroutine before raising so we don't leak a
+                # "coroutine was never awaited" RuntimeWarning on top of the
+                # error we're already surfacing.
+                if inspect.iscoroutine(output):
+                    output.close()
                 raise TypeError(
                     f"{fn!r} returned an awaitable but was not detected as async. "
                     "Declare it as ``async def`` or call it via the ainvoke path; "

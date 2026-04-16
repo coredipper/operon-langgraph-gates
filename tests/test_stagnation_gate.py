@@ -118,7 +118,10 @@ async def test_wrap_handles_async_fn() -> None:
 
 def test_sync_wrap_raises_if_fn_returns_awaitable() -> None:
     """Defensive: fn advertised as sync but returns an awaitable is a bug; raise
-    loud rather than measure ``str(coroutine)``."""
+    loud rather than measure ``str(coroutine)``, and don't leak a
+    ``coroutine was never awaited`` RuntimeWarning."""
+    import warnings
+
     import pytest
 
     gate = _make_gate()
@@ -131,8 +134,15 @@ def test_sync_wrap_raises_if_fn_returns_awaitable() -> None:
         return inner(state)
 
     wrapped = gate.wrap(sync_returning_coro)
-    with pytest.raises(TypeError, match="awaitable"):
-        wrapped({"input": "q"})
+    with warnings.catch_warnings(record=True) as captured:
+        warnings.simplefilter("always")
+        with pytest.raises(TypeError, match="awaitable"):
+            wrapped({"input": "q"})
+
+    # The coroutine must be closed before TypeError is raised, so no
+    # "coroutine was never awaited" RuntimeWarning should escape.
+    leaks = [w for w in captured if "coroutine" in str(w.message).lower()]
+    assert leaks == [], f"Leaked coroutine warnings: {[str(w.message) for w in leaks]}"
 
 
 def test_wrap_forwards_extra_args_to_fn() -> None:
@@ -167,6 +177,25 @@ def test_thread_id_extracted_from_runtime_like_object() -> None:
     # Thread A must be the one that accumulated the stagnation.
     assert edge({}, rt_a) == "escalate"
     assert edge({}, FakeRuntime("B")) == "answer"
+
+
+def test_thread_id_extracted_from_runtime_keyword_arg() -> None:
+    """LangGraph can pass ``runtime`` as a keyword-only argument; the gate
+    must find the thread id regardless of which kwarg name carries it."""
+    gate = _make_gate()
+
+    class FakeRuntime:
+        def __init__(self, thread_id: str) -> None:
+            self.config = {"configurable": {"thread_id": thread_id}}
+
+    wrapped = gate.wrap(lambda state, *, runtime: {"answer": "same response every turn"})
+    edge = gate.edge(forward="answer", break_to="escalate")
+
+    for _ in range(6):
+        wrapped({"q": "q"}, runtime=FakeRuntime("A"))
+
+    assert edge({}, runtime=FakeRuntime("A")) == "escalate"
+    assert edge({}, runtime=FakeRuntime("B")) == "answer"
 
 
 async def test_wrap_handles_callable_class_with_async_call() -> None:
