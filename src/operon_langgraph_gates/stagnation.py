@@ -34,6 +34,7 @@ from typing import Any
 from operon_ai.core.certificate import Certificate, _verify_behavioral_stability
 from operon_ai.health.epiplexity import EmbeddingProvider, EpiplexityMonitor
 
+from ._common import EPHEMERAL_THREAD, thread_id
 from .embedders import NGramEmbedder
 
 # LangGraph node functions consume and return arbitrary mappings (TypedDict,
@@ -43,8 +44,6 @@ _NodeIn = Any
 _NodeOut = Any
 NodeFn = Callable[..., _NodeOut]
 TextExtractor = Callable[[_NodeOut], str]
-
-_EPHEMERAL_THREAD = "__ephemeral__"
 
 
 @dataclass
@@ -97,7 +96,7 @@ class StagnationGate:
         For per-thread checks inside a LangGraph run, use :meth:`edge` — it
         reads the correct thread from the passed-in ``config`` automatically.
         """
-        state = self._threads.get(_EPHEMERAL_THREAD)
+        state = self._threads.get(EPHEMERAL_THREAD)
         return state is not None and state.is_stagnant
 
     @property
@@ -125,14 +124,14 @@ class StagnationGate:
 
             async def async_wrapped(state: _NodeIn, *args: Any, **kwargs: Any) -> _NodeOut:
                 output = await fn(state, *args, **kwargs)
-                self._observe(extract(output), _thread_id(args, kwargs))
+                self._observe(extract(output), thread_id(args, kwargs))
                 return output
 
             return async_wrapped
 
         def sync_wrapped(state: _NodeIn, *args: Any, **kwargs: Any) -> _NodeOut:
             output = fn(state, *args, **kwargs)
-            self._observe(extract(output), _thread_id(args, kwargs))
+            self._observe(extract(output), thread_id(args, kwargs))
             return output
 
         return sync_wrapped
@@ -141,7 +140,7 @@ class StagnationGate:
         """Conditional-edge router: returns ``break_to`` when stagnant."""
 
         def route(_state: _NodeIn, *args: Any, **kwargs: Any) -> str:
-            tid = _thread_id(args, kwargs)
+            tid = thread_id(args, kwargs)
             state = self._threads.get(tid)
             return break_to if state is not None and state.is_stagnant else forward
 
@@ -188,25 +187,6 @@ class StagnationGate:
 
         if state.is_stagnant and not was_stagnant:
             _emit_certificate(state, self._threshold)
-
-
-def _thread_id(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
-    """Extract ``thread_id`` from LangGraph config/runtime, or fall back."""
-    # LangGraph passes config as the second positional arg to a node, or as
-    # ``config`` kwarg. A RunnableConfig is a dict with a ``configurable``
-    # inner dict that holds ``thread_id``.
-    candidates: list[Any] = list(args)
-    cfg = kwargs.get("config")
-    if cfg is not None:
-        candidates.append(cfg)
-    for c in candidates:
-        if isinstance(c, dict):
-            configurable = c.get("configurable")
-            if isinstance(configurable, dict):
-                tid = configurable.get("thread_id")
-                if tid is not None:
-                    return str(tid)
-    return _EPHEMERAL_THREAD
 
 
 def _emit_certificate(state: _ThreadState, threshold: float) -> None:

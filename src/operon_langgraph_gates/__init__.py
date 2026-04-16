@@ -12,8 +12,9 @@ Backed by Paper 4 §4.3 (stagnation, 96% real-embedding accuracy) and §4.1
 under compilation).
 """
 
+from .integrity import IntegrityGate
 from .stagnation import StagnationGate
 
 __version__ = "0.1.0a0"
 
-__all__ = ["StagnationGate", "__version__"]
+__all__ = ["IntegrityGate", "StagnationGate", "__version__"]
