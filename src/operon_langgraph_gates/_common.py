@@ -13,29 +13,50 @@ from typing import Any
 
 EPHEMERAL_THREAD = "__ephemeral__"
 
+# Kwarg names LangGraph is known to use when injecting a RunnableConfig
+# dict or a Runtime object into a node. Only these names are trusted for
+# dict-shaped extraction, so a business kwarg whose dict happens to have
+# a ``configurable.thread_id`` key doesn't hijack thread routing.
+_LANGGRAPH_KWARG_NAMES: tuple[str, ...] = ("config", "runtime")
+
 
 def thread_id(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
     """Extract ``thread_id`` from a LangGraph config/runtime passed to a node.
 
-    LangGraph passes either:
+    Resolution order, most-trusted first:
 
-    - A ``RunnableConfig`` dict as the node's second positional argument or
-      as the ``config`` keyword argument. Its ``configurable`` inner dict
-      holds ``thread_id``.
-    - A ``Runtime`` object (LangGraph 1.x newer nodes) with attribute access
-      for ``.config``, which is itself a ``RunnableConfig`` dict. Runtime may
-      arrive positionally or as any keyword (common names: ``runtime``,
-      ``config``).
+    1. Positional args (LangGraph invocation protocol: ``state`` plus an
+       optional ``config`` dict or ``runtime`` object).
+    2. Known LangGraph kwarg names — ``config``, ``runtime``. Any shape
+       (dict or Runtime-like) is accepted.
+    3. Other kwargs — only *Runtime-like* objects (non-dict with a
+       ``.config`` attribute). Plain dicts here are treated as business
+       payloads and **not** interpreted as RunnableConfig, even if their
+       shape happens to match.
 
-    We scan every positional arg and every kwarg value; whichever one yields
-    a ``configurable.thread_id`` wins. Fall back to :data:`EPHEMERAL_THREAD`
-    when no thread id is present — that keeps one-shot calls (tests, scripts
-    without persistence) working without forcing a thread id.
+    Falls back to :data:`EPHEMERAL_THREAD` when no thread id is present.
     """
-    for c in (*args, *kwargs.values()):
+    # (1) positional — LangGraph protocol slots.
+    for c in args:
         tid = _extract_thread_id(c)
         if tid is not None:
             return tid
+
+    # (2) explicit LangGraph kwarg names — trust any shape.
+    for name in _LANGGRAPH_KWARG_NAMES:
+        if name in kwargs:
+            tid = _extract_thread_id(kwargs[name])
+            if tid is not None:
+                return tid
+
+    # (3) remaining kwargs — Runtime-like (non-dict with ``.config``) only.
+    for name, value in kwargs.items():
+        if name in _LANGGRAPH_KWARG_NAMES or isinstance(value, dict):
+            continue
+        tid = _extract_thread_id(value)
+        if tid is not None:
+            return tid
+
     return EPHEMERAL_THREAD
 
 

@@ -179,6 +179,28 @@ def test_thread_id_extracted_from_runtime_like_object() -> None:
     assert edge({}, FakeRuntime("B")) == "answer"
 
 
+def test_thread_id_ignores_business_kwargs_shaped_like_config() -> None:
+    """A plain-dict business kwarg that happens to contain a
+    ``configurable.thread_id`` path must NOT be interpreted as LangGraph
+    config. Only known LangGraph kwarg names (``config``, ``runtime``) or
+    Runtime-like objects with ``.config`` should be scanned for thread id.
+    """
+    gate = _make_gate()
+    wrapped = gate.wrap(
+        lambda state, **kw: {"answer": "same response every turn"},
+    )
+
+    # Bogus business payload with the same shape as a RunnableConfig.
+    business = {"configurable": {"thread_id": "hijacked"}}
+    for _ in range(6):
+        wrapped({"q": "q"}, business_payload=business)
+
+    # The "hijacked" bucket must not have been populated — measurements
+    # should have landed in the ephemeral bucket.
+    assert gate.is_stagnant_for("hijacked") is False
+    assert gate.is_stagnant is True
+
+
 def test_thread_id_extracted_from_runtime_keyword_arg() -> None:
     """LangGraph can pass ``runtime`` as a keyword-only argument; the gate
     must find the thread id regardless of which kwarg name carries it."""
