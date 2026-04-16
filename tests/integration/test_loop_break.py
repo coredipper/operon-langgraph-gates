@@ -36,7 +36,13 @@ def _escalate(state: LoopState) -> LoopState:
 
 def _build_gated_graph(gate: StagnationGate) -> object:
     graph = StateGraph(LoopState)
-    graph.add_node("think", gate.wrap(_think))
+    # Measure only the `answer` field — the turn counter increments each call
+    # and would otherwise contaminate the stagnation signal with string drift
+    # unrelated to the repeated model output.
+    graph.add_node(
+        "think",
+        gate.wrap(_think, text_extractor=lambda out: out["answer"]),
+    )
     graph.add_node("escalate", _escalate)
     graph.add_edge(START, "think")
     graph.add_conditional_edges(
@@ -48,7 +54,10 @@ def _build_gated_graph(gate: StagnationGate) -> object:
 
 
 def test_stagnation_gate_breaks_infinite_loop() -> None:
-    """Gate detects stagnation and routes out of the self-loop."""
+    """Gate detects stagnation and routes out of the self-loop promptly."""
+    # window_size=3, critical_duration=2 => detection requires ~5 warmup turns
+    # for the integral to slide below threshold for 2 consecutive readings.
+    # Upper bound proves the gate fires *promptly*, not just eventually.
     gate = StagnationGate(threshold=0.2, critical_duration=2, window_size=3)
     app = _build_gated_graph(gate)
 
@@ -57,8 +66,11 @@ def test_stagnation_gate_breaks_infinite_loop() -> None:
 
     # Graph terminated via the escalate branch.
     assert result["answer"] == "escalated"
-    # Enough iterations happened to accumulate evidence (critical_duration + warmup).
-    assert result["turn"] >= 3
+    # Detection must happen in a narrow window: enough warmup for evidence,
+    # but well before the recursion limit (or the baseline would dominate).
+    assert 3 <= result["turn"] <= 10, (
+        f"Expected gate to fire between turns 3 and 10; saw turn={result['turn']}"
+    )
     # A behavioral_stability certificate was emitted at the moment of detection.
     certs = gate.certificates
     assert len(certs) >= 1

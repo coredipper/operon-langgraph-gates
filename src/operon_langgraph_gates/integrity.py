@@ -31,7 +31,7 @@ from typing import Any
 
 from operon_ai.core.certificate import Certificate, register_verify_fn
 
-from ._common import EPHEMERAL_THREAD, thread_id
+from ._common import EPHEMERAL_THREAD, is_async_callable, thread_id
 
 _NodeIn = Any
 _NodeOut = Any
@@ -87,8 +87,17 @@ class IntegrityGate:
 
     @property
     def is_violated(self) -> bool:
-        """True if the ephemeral (default-thread) state has been violated."""
+        """True if the ephemeral (default-thread) state has been violated.
+
+        For per-thread checks inside a LangGraph run, use :meth:`edge` or
+        :meth:`is_violated_for`.
+        """
         state = self._threads.get(EPHEMERAL_THREAD)
+        return state is not None and state.is_violated
+
+    def is_violated_for(self, thread_id_: str) -> bool:
+        """Whether a specific LangGraph thread has been violated."""
+        state = self._threads.get(thread_id_)
         return state is not None and state.is_violated
 
     @property
@@ -110,7 +119,7 @@ class IntegrityGate:
         LangGraph's ``config`` / ``runtime`` are preserved and the gate can
         scope state per ``thread_id``.
         """
-        if inspect.iscoroutinefunction(fn):
+        if is_async_callable(fn):
 
             async def async_wrapped(state: _NodeIn, *args: Any, **kwargs: Any) -> _NodeOut:
                 output = await fn(state, *args, **kwargs)
@@ -121,6 +130,12 @@ class IntegrityGate:
 
         def sync_wrapped(state: _NodeIn, *args: Any, **kwargs: Any) -> _NodeOut:
             output = fn(state, *args, **kwargs)
+            if inspect.isawaitable(output):
+                raise TypeError(
+                    f"{fn!r} returned an awaitable but was not detected as async. "
+                    "Declare it as ``async def`` or call it via the ainvoke path; "
+                    "the sync gate wrapper cannot measure an unawaited coroutine."
+                )
             self._check(output, thread_id(args, kwargs))
             return output
 

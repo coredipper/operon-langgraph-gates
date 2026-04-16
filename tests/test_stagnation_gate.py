@@ -116,6 +116,25 @@ async def test_wrap_handles_async_fn() -> None:
     assert gate.is_stagnant is True
 
 
+def test_sync_wrap_raises_if_fn_returns_awaitable() -> None:
+    """Defensive: fn advertised as sync but returns an awaitable is a bug; raise
+    loud rather than measure ``str(coroutine)``."""
+    import pytest
+
+    gate = _make_gate()
+
+    async def inner(state: dict[str, object]) -> dict[str, str]:
+        return {"answer": "x"}
+
+    # Declare the outer sync-looking but actually returns a coroutine.
+    def sync_returning_coro(state: dict[str, object]) -> object:
+        return inner(state)
+
+    wrapped = gate.wrap(sync_returning_coro)
+    with pytest.raises(TypeError, match="awaitable"):
+        wrapped({"input": "q"})
+
+
 def test_wrap_forwards_extra_args_to_fn() -> None:
     gate = _make_gate()
     received: list[object] = []
@@ -127,6 +146,52 @@ def test_wrap_forwards_extra_args_to_fn() -> None:
     wrapped = gate.wrap(fn)
     wrapped({"q": "q"}, {"thread_id": "A"})
     assert received == [{"thread_id": "A"}]
+
+
+def test_thread_id_extracted_from_runtime_like_object() -> None:
+    """LangGraph 1.x passes a Runtime object (attribute access for .config),
+    not the raw dict config. The gate must unwrap it to extract thread_id."""
+    gate = _make_gate()
+
+    class FakeRuntime:
+        def __init__(self, thread_id: str) -> None:
+            self.config = {"configurable": {"thread_id": thread_id}}
+
+    wrapped = gate.wrap(lambda state, rt: {"answer": "same response every turn"})
+    edge = gate.edge(forward="answer", break_to="escalate")
+
+    rt_a = FakeRuntime("A")
+    for _ in range(6):
+        wrapped({"q": "q"}, rt_a)
+
+    # Thread A must be the one that accumulated the stagnation.
+    assert edge({}, rt_a) == "escalate"
+    assert edge({}, FakeRuntime("B")) == "answer"
+
+
+async def test_wrap_handles_callable_class_with_async_call() -> None:
+    """Async detection must catch classes with ``async def __call__``."""
+    gate = _make_gate()
+
+    class AsyncNode:
+        async def __call__(self, state: dict[str, object]) -> dict[str, str]:
+            return {"answer": "same response every turn"}
+
+    wrapped = gate.wrap(AsyncNode())
+    for _ in range(6):
+        out = await wrapped({"input": "q"})
+        assert out == {"answer": "same response every turn"}
+    assert gate.is_stagnant is True
+
+
+def test_is_stagnant_for_reads_specific_thread() -> None:
+    gate = _make_gate()
+    wrapped = gate.wrap(lambda state, config=None: {"answer": "same response every turn"})
+    cfg_a = {"configurable": {"thread_id": "A"}}
+    for _ in range(6):
+        wrapped({"q": "q"}, cfg_a)
+    assert gate.is_stagnant_for("A") is True
+    assert gate.is_stagnant_for("B") is False
 
 
 def test_edge_routes_per_thread() -> None:

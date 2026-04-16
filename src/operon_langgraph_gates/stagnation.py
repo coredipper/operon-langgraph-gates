@@ -34,7 +34,7 @@ from typing import Any
 from operon_ai.core.certificate import Certificate, _verify_behavioral_stability
 from operon_ai.health.epiplexity import EmbeddingProvider, EpiplexityMonitor
 
-from ._common import EPHEMERAL_THREAD, thread_id
+from ._common import EPHEMERAL_THREAD, is_async_callable, thread_id
 from .embedders import NGramEmbedder
 
 # LangGraph node functions consume and return arbitrary mappings (TypedDict,
@@ -93,10 +93,16 @@ class StagnationGate:
     def is_stagnant(self) -> bool:
         """Whether the ephemeral (default-thread) measurement is stagnant.
 
-        For per-thread checks inside a LangGraph run, use :meth:`edge` — it
-        reads the correct thread from the passed-in ``config`` automatically.
+        For per-thread checks inside a LangGraph run, use :meth:`edge` (which
+        extracts thread_id from config automatically) or
+        :meth:`is_stagnant_for`.
         """
         state = self._threads.get(EPHEMERAL_THREAD)
+        return state is not None and state.is_stagnant
+
+    def is_stagnant_for(self, thread_id_: str) -> bool:
+        """Whether a specific LangGraph thread is currently stagnant."""
+        state = self._threads.get(thread_id_)
         return state is not None and state.is_stagnant
 
     @property
@@ -120,7 +126,7 @@ class StagnationGate:
         """
         extract = text_extractor or (lambda out: str(out))
 
-        if inspect.iscoroutinefunction(fn):
+        if is_async_callable(fn):
 
             async def async_wrapped(state: _NodeIn, *args: Any, **kwargs: Any) -> _NodeOut:
                 output = await fn(state, *args, **kwargs)
@@ -131,6 +137,12 @@ class StagnationGate:
 
         def sync_wrapped(state: _NodeIn, *args: Any, **kwargs: Any) -> _NodeOut:
             output = fn(state, *args, **kwargs)
+            if inspect.isawaitable(output):
+                raise TypeError(
+                    f"{fn!r} returned an awaitable but was not detected as async. "
+                    "Declare it as ``async def`` or call it via the ainvoke path; "
+                    "the sync gate wrapper cannot measure an unawaited coroutine."
+                )
             self._observe(extract(output), thread_id(args, kwargs))
             return output
 
