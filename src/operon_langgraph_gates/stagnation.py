@@ -1,17 +1,43 @@
 """StagnationGate — Bayesian stagnation detection for LangGraph nodes and edges.
 
-Backed by Paper 4 §4.3 (Bayesian stagnation detection, 96% accuracy with real
-embeddings; Operon Papers). This module is a thin LangGraph-friendly wrapper
-over ``operon_ai.health.epiplexity.EpiplexityMonitor`` — it adds:
+Backed by Operon Paper 4 §4.3 "Epiplexity: Embedding Quality Determines
+Outcome". With real sentence embeddings (all-MiniLM-L6-v2, N = 3 seeds
+× 100 trials = 300), the biological two-signal monitor achieves:
 
-- A text-extraction step (LangGraph node outputs are typically dicts, not text).
-- A zero-dep default embedder (``NGramEmbedder``) so the gate works without
-  a neural model install. Pass ``embedder=...`` for a real one.
-- Per-thread state scoping: each LangGraph ``config["configurable"]["thread_id"]``
-  gets its own monitor and certificates, so reusing a compiled graph across
-  invocations or running concurrent threads doesn't leak stagnation state.
-- Async node support via ``inspect.iscoroutinefunction`` detection.
-- ``behavioral_stability`` certificate emission on first detection per thread.
+- **convergence discrimination**: 0.960 accuracy (vs 0.401 naive baseline)
+- **false-stagnation rejection**: 0.960 accuracy, 0.000 FP rate
+  (vs 0.020 accuracy, 0.980 FP rate for the naive baseline)
+- **loop detection**: 0.631 accuracy (the naive detector scores 0.940
+  here, so the strength of this gate is in convergence/false-stagnation
+  rather than loop detection per se)
+
+Authoritative source for these numbers:
+``/Users/bogdan/core/operon/eval/results/benchmarks_real_embeddings/multi_model_summary.json``
+(commit ``339875e``). A full citation record with verbatim paper quotes
+and reproduction commands is at ``docs/paper-citations.md``.
+
+In practice the gate is effective at breaking stuck loops (see
+``tests/integration/test_loop_break.py``) because most real-world
+stagnation presents as identical or near-identical outputs that trip the
+epiplexic integral rather than the classifier's loop scenario. Using
+``epiplexic_integral`` directly — rather than the monitor's status
+classifier — gives the gate its stable detection signal.
+
+This module is a thin LangGraph-friendly wrapper over
+``operon_ai.health.epiplexity.EpiplexityMonitor``. It adds:
+
+- A text-extraction step (LangGraph node outputs are typically dicts, not
+  text).
+- A zero-dep default embedder (``NGramEmbedder``) so the gate works
+  without a neural model install. Pass ``embedder=...`` for a real one;
+  the Paper 4 numbers above were measured with ``all-MiniLM-L6-v2``.
+- Per-thread state scoping keyed on
+  ``config["configurable"]["thread_id"]`` so reusing a compiled graph
+  across invocations or running concurrent threads doesn't leak state.
+- Async node support via ``_common.is_async_callable`` (also catches
+  classes with ``async def __call__``).
+- ``behavioral_stability`` certificate emission on first detection per
+  thread.
 
 Usage::
 

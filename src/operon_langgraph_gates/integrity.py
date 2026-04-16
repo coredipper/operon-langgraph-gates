@@ -1,11 +1,29 @@
 """IntegrityGate — runtime invariant checks on LangGraph node output.
 
-Backed by Paper 4 §4.1 (state integrity, 3/3 on canonical benchmarks) and
-Paper 5 §3 (certificate preservation under compilation). Conceptually a
-thin LangGraph adapter over the same *state-integrity* idea Operon uses
-for DNA-repair checkpoints — but the public API uses LangGraph terms
-(``invariants``, ``thread_id``, ``schema``) rather than the biology
-vocabulary of the upstream implementation.
+Backed by Operon Paper 4 §4 (Results, "State integrity: clear structural
+value"). In the paper's canonical state-integrity task with four
+corruption sites (three gene drifts + one checksum failure) injected
+between agent stages, the ``DNARepair`` pre/post-flight integrity check
+achieves:
+
+- **FULL** variant (with ``DNARepair``): **100%** detection, **100%**
+  repair across all repetitions.
+- **RAW** and **GUARDED** variants (no integrity check): **0%**
+  detection, **0%** repair — blind to the corruption.
+
+Paper 4 calls this "the strongest structural guarantee in the evaluated
+stack" (§4, Table 3, Integrity row). Paper 5 §3 proves the
+``state_integrity_verified`` certificate is preserved under compilation
+across all measured compiler functors (3/3 or 5/5 depending on scope).
+
+A full citation record with verbatim paper quotes and a pointer to the
+archived benchmark data is at ``docs/paper-citations.md``.
+
+This module is conceptually a thin LangGraph adapter over the same
+*state-integrity* idea Operon uses for DNA-repair checkpoints — but the
+public API uses LangGraph terms (``invariants``, ``thread_id``) and a
+fresh theorem (``langgraph_state_integrity``) with clean evidence
+fields, not the biology vocabulary of the upstream implementation.
 
 Usage::
 
