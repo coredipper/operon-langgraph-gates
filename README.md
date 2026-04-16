@@ -35,7 +35,7 @@ graph.add_conditional_edges(
 certs = StagnationGate.collect(graph)
 ```
 
-Backed by [Paper 4 §4.3: Bayesian stagnation detection, 96% accuracy with real embeddings](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf).
+Backed by [Paper 4 §4.3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): convergence/false-stagnation accuracy **0.960** with real sentence embeddings (all-MiniLM-L6-v2, N = 300 trials). See [`docs/paper-citations.md`](./docs/paper-citations.md) for the full citation record, including the loop-detection caveat and a pointer to the archived benchmark data.
 
 ### Catch checkpointer drift (`IntegrityGate`)
 
@@ -50,7 +50,12 @@ checkpointer = IntegrityGate.wrap(
 graph = workflow.compile(checkpointer=checkpointer)
 ```
 
-Backed by [Paper 4 §4.1: DNA-repair state integrity, 3/3 on canonical benchmarks](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf) + [Paper 5 §3: certificate preservation under compilation](https://github.com/coredipper/operon/blob/main/article/paper5/main.pdf).
+Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): *in the paper's setup*, the FULL variant (with `DNARepair`) achieves 100% detection and 100% repair of injected state corruption, vs 0%/0% for RAW and GUARDED. **This package is detection-and-certification only — it does not repair state.** It reformulates the idea as a LangGraph-native invariant gate. [Paper 5 §3](https://github.com/coredipper/operon/blob/main/article/paper5/main.pdf) establishes the preservation-under-compilation framework that the gate's certificate follows. See [`docs/paper-citations.md`](./docs/paper-citations.md) for verbatim quotes and the honest caveat.
+
+## Examples
+
+- [`examples/01_stagnation_breaks_loop.ipynb`](./examples/01_stagnation_breaks_loop.ipynb) — reproduces issue #6731 pathology, then fixes it with a ten-line diff.
+- [`examples/02_integrity_catches_drift.ipynb`](./examples/02_integrity_catches_drift.ipynb) — a three-node graph silently corrupts state; `IntegrityGate` catches it with replayable evidence.
 
 ## Status
 
