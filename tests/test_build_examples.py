@@ -49,13 +49,22 @@ def test_integrity_cells_have_stable_ids(builder: object) -> None:
 
 
 def test_id_assignment_is_idempotent(builder: object) -> None:
-    """Running the ID assignment twice produces the same IDs — proves
-    regeneration is a no-op on IDs rather than rotating them."""
-    cells_a = list(builder.NB1_CELLS)  # type: ignore[attr-defined]
-    cells_b = list(builder.NB1_CELLS)  # type: ignore[attr-defined]
+    """Running the ID assignment twice on independent copies produces
+    the same IDs — proves regeneration is a no-op on IDs rather than
+    rotating them. Uses deepcopy so mutations on one copy can't leak
+    into the other (shallow ``list()`` over NotebookNode references
+    would share mutable cells and mask non-idempotence)."""
+    from copy import deepcopy
+
+    cells_a = deepcopy(builder.NB1_CELLS)  # type: ignore[attr-defined]
+    cells_b = deepcopy(builder.NB1_CELLS)  # type: ignore[attr-defined]
     builder._assign_stable_ids(cells_a, "stagnation")  # type: ignore[attr-defined]
     builder._assign_stable_ids(cells_b, "stagnation")  # type: ignore[attr-defined]
     assert [c["id"] for c in cells_a] == [c["id"] for c in cells_b]
+    # And also a no-op second pass on the same list must not change IDs.
+    ids_before = [c["id"] for c in cells_a]
+    builder._assign_stable_ids(cells_a, "stagnation")  # type: ignore[attr-defined]
+    assert [c["id"] for c in cells_a] == ids_before
 
 
 def test_integrity_example_uses_explicit_none(builder: object) -> None:

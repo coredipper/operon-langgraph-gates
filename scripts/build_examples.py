@@ -2,16 +2,20 @@
 
 Run with:
 
-    .venv/bin/python scripts/build_examples.py
+    .venv/bin/python scripts/build_examples.py            # source only
+    .venv/bin/python scripts/build_examples.py --execute  # also run cells
 
-This keeps the notebook *source* reviewable as plain Python strings
-rather than pages of JSON. The generated ``.ipynb`` files live under
-``examples/`` and are then executed via
-``jupyter nbconvert --to notebook --execute`` to populate outputs.
+The ``--execute`` flag runs each notebook end-to-end and strips the
+per-run ``metadata.execution`` timestamp fields (``iopub.execute_input``,
+``shell.execute_reply``, etc.) so a no-op regenerate-and-execute is a
+true byte-for-byte no-op on git. Keep the notebook *source* reviewable
+as plain Python strings rather than pages of JSON; generated ``.ipynb``
+files live under ``examples/``.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from textwrap import dedent
@@ -365,10 +369,53 @@ def _write(path: Path, cells: list[nbformat.NotebookNode], id_prefix: str) -> No
     print(f"wrote {path.relative_to(ROOT)}")
 
 
+def _strip_execution_timestamps(path: Path) -> None:
+    """Drop ``metadata.execution`` fields that nbconvert writes on each run.
+
+    Those fields (``iopub.execute_input``, ``shell.execute_reply``, etc.) are
+    per-execution timestamps — useful at runtime, noise in version control.
+    Stripping them makes regenerate-and-execute a true no-op for git.
+    """
+    data = json.loads(path.read_text())
+    for cell in data.get("cells", []):
+        meta = cell.get("metadata", {})
+        if "execution" in meta:
+            del meta["execution"]
+    path.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
+
+
+def _execute(path: Path) -> None:
+    """Run the notebook in place and scrub per-run timestamps after."""
+    # Import lazily so the bare `python scripts/build_examples.py` path
+    # doesn't require nbclient + ipykernel.
+    from nbclient import NotebookClient
+
+    nb = nbformat.read(path, as_version=4)
+    NotebookClient(nb, timeout=60, kernel_name="python3").execute()
+    nbformat.write(nb, path)
+    _strip_execution_timestamps(path)
+    print(f"executed {path.relative_to(ROOT)}")
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="also execute the notebooks in place and scrub timestamps",
+    )
+    args = parser.parse_args()
+
     EXAMPLES.mkdir(exist_ok=True)
-    _write(EXAMPLES / "01_stagnation_breaks_loop.ipynb", NB1_CELLS, id_prefix="stagnation")
-    _write(EXAMPLES / "02_integrity_catches_drift.ipynb", NB2_CELLS, id_prefix="integrity")
+    paths = [
+        (EXAMPLES / "01_stagnation_breaks_loop.ipynb", NB1_CELLS, "stagnation"),
+        (EXAMPLES / "02_integrity_catches_drift.ipynb", NB2_CELLS, "integrity"),
+    ]
+    for path, cells, prefix in paths:
+        _write(path, cells, id_prefix=prefix)
+    if args.execute:
+        for path, _, _ in paths:
+            _execute(path)
 
 
 if __name__ == "__main__":
