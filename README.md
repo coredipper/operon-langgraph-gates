@@ -52,6 +52,11 @@ graph = workflow.compile(checkpointer=checkpointer)
 
 Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): the FULL integrity variant detects and repairs **100%** of injected state-corruption sites (vs 0% for RAW and GUARDED variants). [Paper 5 §3](https://github.com/coredipper/operon/blob/main/article/paper5/main.pdf) proves the certificate is preserved under compilation. See [`docs/paper-citations.md`](./docs/paper-citations.md) for verbatim quotes and the honest caveat: this gate is a LangGraph reformulation of the paper's idea, not a direct reuse of `DNARepair`.
 
+## Examples
+
+- [`examples/01_stagnation_breaks_loop.ipynb`](./examples/01_stagnation_breaks_loop.ipynb) — reproduces issue #6731 pathology, then fixes it with a ten-line diff.
+- [`examples/02_integrity_catches_drift.ipynb`](./examples/02_integrity_catches_drift.ipynb) — a three-node graph silently corrupts state; `IntegrityGate` catches it with replayable evidence.
+
 ## Status
 
 **Alpha.** API may change before `0.1.0` stable. Feedback welcome via Issues.
