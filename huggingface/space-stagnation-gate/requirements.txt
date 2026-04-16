@@ -1,0 +1,2 @@
+gradio>=4.0
+operon-langgraph-gates @ git+https://github.com/coredipper/operon-langgraph-gates.git@main
