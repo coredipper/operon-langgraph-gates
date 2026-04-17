@@ -1,10 +1,17 @@
 # operon-langgraph-gates
 
-> Reliability primitives for LangGraph — drop-in, cert-emitting.
+> **In-graph** reliability gates for LangGraph — drop-in, cert-emitting.
 
 [LangGraph issue #6731](https://github.com/langchain-ai/langgraph/issues/6731) — *"agent infinite-loops until recursion limit, burns tokens invisibly"* — was closed as **NOT_PLANNED**. LangChain's answer: *"use tool-call limits in middleware."*
 
 This package ships that missing native gate, plus a second one for checkpointer-write integrity. Two primitives. No framework adoption. ~10-line diff on an existing `StateGraph`.
+
+Both gates run **inside** the graph: they route conditional edges and can short-circuit the next step. This is a deliberate contrast to post-hoc observability tools — an observer tells you an agent looped after the fact; a gate stops the loop mid-run and emits a replayable certificate of what fired it.
+
+**At a glance:**
+
+- `StagnationGate` — Bayesian stagnation detection (Paper 4 §4.3, 0.960 on convergence / false-stagnation scenarios) with per-thread state, async + class-callable aware. [See it live.](https://huggingface.co/spaces/coredipper/operon-stagnation-gate)
+- `IntegrityGate` — user-defined invariants checked on every wrapped node's output; violations emit a `langgraph_state_integrity` certificate with replayable evidence. Detection-and-certification only; does not repair state.
 
 ## Install
 
