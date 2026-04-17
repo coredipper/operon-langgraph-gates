@@ -1,4 +1,7 @@
-gradio==6.12.0
+# Gradio version is pinned by the ``sdk_version: "6.12.0"`` field in
+# README.md's YAML frontmatter (HF Spaces convention). A floor here
+# keeps local installs working in any recent 4.x or newer environment.
+gradio>=4.0
 # Pinned to 48e41c3 (PR #3 merge) — first commit that contains
 # ``StagnationGate.integrals_for()``, which this app depends on.
 operon-langgraph-gates @ git+https://github.com/coredipper/operon-langgraph-gates.git@48e41c3
