@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operon-langgraph-gates"
-version = "0.1.0a0"
+version = "0.1.0a1"
 description = "Reliability primitives for LangGraph — certified stagnation and integrity gates, backed by the Operon categorical framework."
 readme = "README.md"
 requires-python = ">=3.11"
