@@ -44,17 +44,25 @@ certs = StagnationGate.collect(graph)
 
 Backed by [Paper 4 §4.3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): convergence/false-stagnation accuracy **0.960** with real sentence embeddings (all-MiniLM-L6-v2, N = 300 trials). See [`docs/paper-citations.md`](./docs/paper-citations.md) for the full citation record, including the loop-detection caveat and a pointer to the archived benchmark data.
 
-### Catch checkpointer drift (`IntegrityGate`)
+### Catch state drift (`IntegrityGate`)
 
 ```python
-from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.graph import StateGraph
 from operon_langgraph_gates import IntegrityGate
 
-checkpointer = IntegrityGate.wrap(
-    PostgresSaver.from_conn_string("..."),
-    invariants=[MyState.__annotations__, my_schema_check],
+gate = IntegrityGate(invariants=[has_required_user, budget_not_exceeded])
+
+graph = StateGraph(State)
+graph.add_node("tool_call", gate.wrap(tool_call_fn))
+
+# Route runs that violated an invariant to a recovery node
+graph.add_conditional_edges(
+    "tool_call",
+    gate.edge(forward="process", break_to="recover"),
 )
-graph = workflow.compile(checkpointer=checkpointer)
+
+# Certificates (one per thread, on first violation) are on the gate
+certs = gate.certificates
 ```
 
 Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): *in the paper's setup*, the FULL variant (with `DNARepair`) achieves 100% detection and 100% repair of injected state corruption, vs 0%/0% for RAW and GUARDED. **This package is detection-and-certification only — it does not repair state.** It reformulates the idea as a LangGraph-native invariant gate. [Paper 5 §3](https://github.com/coredipper/operon/blob/main/article/paper5/main.pdf) establishes the preservation-under-compilation framework that the gate's certificate follows. See [`docs/paper-citations.md`](./docs/paper-citations.md) for verbatim quotes and the honest caveat.
