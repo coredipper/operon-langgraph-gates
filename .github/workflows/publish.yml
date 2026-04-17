@@ -8,6 +8,11 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
+      # Explicit ``permissions`` replaces the default GITHUB_TOKEN scopes
+      # wholesale, so we have to name every scope we need — ``id-token:
+      # write`` alone would break actions/checkout on any repo/org whose
+      # default scopes are restricted.
+      contents: read
       id-token: write
 
     steps:
