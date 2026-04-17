@@ -4,6 +4,7 @@
 # on deploy, so UI/API regressions that only show up on the deployed
 # version can't pass locally. If this bumps, bump the frontmatter too.
 gradio==6.12.0
-# Pinned to 48e41c3 (PR #3 merge) — first commit that contains
-# ``StagnationGate.integrals_for()``, which this app depends on.
-operon-langgraph-gates @ git+https://github.com/coredipper/operon-langgraph-gates.git@48e41c3
+# First published on PyPI as 0.1.0a1 (includes ``integrals_for()`` which
+# this app depends on). Bump in lockstep with app.py whenever the Space
+# starts calling a newer API.
+operon-langgraph-gates==0.1.0a1
