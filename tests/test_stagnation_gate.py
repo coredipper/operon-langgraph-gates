@@ -497,6 +497,50 @@ def test_certificate_conclusion_reports_exact_detection_index() -> None:
     )
 
 
+def test_emission_failure_leaves_state_retryable(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Regression for roborev job 790 Medium (sibling of openhands-gates 788).
+
+    If ``_emit_certificate`` raises (e.g. the theorem isn't registered),
+    the gate must NOT be left in a permanent ``is_stagnant=True`` state
+    without a corresponding certificate — the ``was_stagnant`` guard in
+    the next call would otherwise suppress cert emission forever.
+    Build the cert before flipping ``state.is_stagnant`` so a failure
+    keeps the state retryable.
+    """
+    from operon_langgraph_gates import stagnation as module
+
+    gate = _make_gate()
+    wrapped = gate.wrap(lambda state: {"answer": "same response every turn"})
+
+    raise_count = [0]
+    original_emit = module._emit_certificate
+
+    def flaky_emit(*args, **kwargs):  # type: ignore[no-untyped-def]
+        if raise_count[0] == 0:
+            raise_count[0] += 1
+            raise RuntimeError("simulated resolver failure")
+        return original_emit(*args, **kwargs)
+
+    monkeypatch.setattr(module, "_emit_certificate", flaky_emit)
+
+    # Drive the gate to the stagnant transition; first emission fails.
+    import pytest
+
+    with pytest.raises(RuntimeError, match="simulated resolver failure"):
+        for _ in range(6):
+            wrapped({"input": "q"})
+
+    # State after failure: not stagnant, no certificate.
+    assert gate.is_stagnant is False
+    assert gate.certificates == []
+
+    # Later call retries emission with the real _emit_certificate.
+    for _ in range(6):
+        wrapped({"input": "q"})
+    assert gate.is_stagnant is True
+    assert gate.certificates
+
+
 def test_windowed_theorem_resolves_through_upstream_registry() -> None:
     """Same-process contract: windowed theorem resolves to a callable,
     distinct from the legacy theorem's callable. Uses the public

@@ -253,9 +253,16 @@ class StagnationGate:
             state.low_integral_streak = 0
 
         was_stagnant = state.is_stagnant
-        state.is_stagnant = state.low_integral_streak >= self._critical_duration
+        should_be_stagnant = state.low_integral_streak >= self._critical_duration
 
-        if state.is_stagnant and not was_stagnant:
+        if should_be_stagnant and not was_stagnant:
+            # Emit the certificate *before* flipping ``state.is_stagnant`` so a
+            # failure (e.g. unregistered theorem) leaves the thread in its
+            # prior non-stagnant state and a later call can retry emission
+            # once the underlying problem is corrected. If we flipped state
+            # first, the ``was_stagnant/not was_stagnant`` guard above would
+            # suppress retry and the thread would be permanently stuck in
+            # ``is_stagnant=True`` without a corresponding certificate.
             violating_integrals = state.integrals[-self._critical_duration :]
             window_severity_means = tuple(1.0 - i for i in violating_integrals)
             cert = _emit_certificate(
@@ -265,6 +272,7 @@ class StagnationGate:
                 source="operon_langgraph_gates.stagnation",
             )
             state.certificates.append(cert)
+        state.is_stagnant = should_be_stagnant
 
 
 # A theorem name distinct from the shared ``behavioral_stability`` (which is
