@@ -432,9 +432,7 @@ def test_certificate_empty_evidence_is_rejected_not_vacuously_stable() -> None:
 
     verify_fn = resolve_verify_fn("behavioral_stability_windowed")
     assert verify_fn is not None
-    holds, evidence = verify_fn(
-        {"signal_values": (), "threshold": 0.8}
-    )
+    holds, evidence = verify_fn({"signal_values": (), "threshold": 0.8})
     assert holds is False
     assert evidence["reason"] == "empty_evidence"
 
@@ -608,7 +606,7 @@ def test_windowed_theorem_resolves_without_this_package_imported(tmp_path) -> No
         "must not depend on it'\n"
         ")\n"
         "print('ok')\n",
-        encoding='utf-8',
+        encoding="utf-8",
     )
     result = subprocess.run(
         [sys.executable, str(probe)],
