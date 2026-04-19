@@ -90,8 +90,10 @@ def test_certificate_emitted_on_stagnation() -> None:
         wrapped({"input": "q"})
     certs = gate.certificates
     assert len(certs) >= 1
-    # The cert carries the theorem name used by operon-ai's behavioral cert.
-    assert certs[0].theorem == "behavioral_stability"
+    # The cert uses a distinct theorem name — ``behavioral_stability_windowed``
+    # — rather than the shared ``behavioral_stability``, so round-tripped
+    # certs don't fall back to the core's flat-mean verifier.
+    assert certs[0].theorem == "behavioral_stability_windowed"
 
 
 def test_certificates_empty_on_healthy_run() -> None:
@@ -330,3 +332,289 @@ def test_text_extractor_used_when_provided() -> None:
     for i in range(6):
         wrapped({"noise": i})
     assert gate.is_stagnant is False
+
+
+# ---------------------------------------------------------------------------
+# Cert-semantics sibling-sync tests — mirror the regression suite that
+# operon-openhands-gates converged on through roborev reviews 760–767.
+# Each test anchors one historical finding so the same class of bug
+# cannot be reintroduced on either sibling.
+# ---------------------------------------------------------------------------
+
+
+def test_certificate_evidence_is_per_window_severity_means() -> None:
+    """Cert ``signal_values`` is one mean per violating rolling window —
+    ``critical_duration`` values — not a flattened severity history."""
+    gate = _make_gate()
+    wrapped = gate.wrap(lambda state: {"answer": "same response every turn"})
+    for _ in range(6):
+        wrapped({"input": "q"})
+    assert gate.certificates, "expected a certificate on sustained stagnation"
+    cert = gate.certificates[0]
+    signal_values = cert.parameters["signal_values"]
+    assert len(signal_values) == gate._critical_duration
+
+
+def test_certificate_verify_uses_max_not_flat_mean_under_overlapping_windows() -> None:
+    """Reviewer 764 counterexample, ported verbatim.
+
+    With ``window=2, critical_duration=2`` and severities ``[0.61, 1.0, 0.61]``,
+    both rolling-window means are ``0.805`` — detection fires against
+    stability threshold ``0.8``. The flattened mean over the union is only
+    ``0.74``, which would incorrectly say stability held under the
+    shared ``_verify_behavioral_stability``. The ported
+    ``_verify_window_max_stability`` must return ``holds=False`` because
+    ``max(window_means) > threshold``.
+    """
+    from operon_langgraph_gates.stagnation import _emit_certificate
+
+    cert = _emit_certificate(
+        window_severity_means=(0.805, 0.805),
+        threshold=0.8,
+        detection_index=3,
+        source="test",
+    )
+    verification = cert.verify()
+    assert verification.holds is False
+    assert verification.evidence["max"] == 0.805
+    assert verification.evidence["n"] == 2
+
+
+def test_certificate_verify_treats_threshold_equality_as_stable() -> None:
+    """Boundary: detection uses strict ``integral < τ`` so the severity-domain
+    complement is the inclusive ``mean(severity) <= 1 - τ``."""
+    from operon_langgraph_gates.stagnation import _emit_certificate
+
+    at_boundary = _emit_certificate(
+        window_severity_means=(0.8,),
+        threshold=0.8,
+        detection_index=1,
+        source="test",
+    )
+    assert at_boundary.verify().holds is True
+
+    just_below = _emit_certificate(
+        window_severity_means=(0.799,),
+        threshold=0.8,
+        detection_index=1,
+        source="test",
+    )
+    assert just_below.verify().holds is True
+
+    just_above = _emit_certificate(
+        window_severity_means=(0.801,),
+        threshold=0.8,
+        detection_index=1,
+        source="test",
+    )
+    assert just_above.verify().holds is False
+
+
+def test_certificate_empty_evidence_is_rejected_not_vacuously_stable() -> None:
+    """Empty evidence is malformed, not vacuous. Two-layer defense:
+    emit raises, upstream verify rejects.
+
+    Uses the public ``resolve_verify_fn`` (operon-ai>=0.36.1) rather
+    than importing the underscored verifier directly.
+    """
+    import pytest
+    from operon_ai.core.certificate import resolve_verify_fn
+
+    from operon_langgraph_gates.stagnation import _emit_certificate
+
+    with pytest.raises(ValueError, match="non-empty"):
+        _emit_certificate(
+            window_severity_means=(),
+            threshold=0.8,
+            detection_index=42,
+            source="test",
+        )
+
+    verify_fn = resolve_verify_fn("behavioral_stability_windowed")
+    assert verify_fn is not None
+    holds, evidence = verify_fn({"signal_values": (), "threshold": 0.8})
+    assert holds is False
+    assert evidence["reason"] == "empty_evidence"
+
+
+def test_certificate_threshold_is_severity_domain_complement() -> None:
+    """Stored cert threshold is the stability threshold ``1 - τ_detect``,
+    so verify agrees with detection at every τ in [0,1] — not just τ <= 0.5."""
+    gate = _make_gate()  # threshold=0.2 by default in this helper
+    wrapped = gate.wrap(lambda state: {"answer": "stuck stuck stuck"})
+    for _ in range(6):
+        wrapped({"input": "q"})
+    assert gate.certificates, "expected a certificate on sustained stagnation"
+    cert = gate.certificates[0]
+    assert cert.parameters["threshold"] == 1.0 - gate._threshold
+
+
+def test_certificate_conclusion_reports_exact_detection_index() -> None:
+    """Regression for roborev jobs 771 Low and 773 Low.
+
+    The conclusion text must quote the *exact* evaluation count at
+    detection — the severities-list length at the moment the cert was
+    emitted. Bounds-only assertions (``N > critical_duration``,
+    ``N >= window_size``) would still pass if the code regressed to
+    reporting some other large number (e.g. the final loop count). Pin
+    the assertion to equality by capturing the cert at its first
+    appearance and comparing N to the integrals-length at that turn.
+    """
+    import re
+
+    gate = StagnationGate(threshold=0.2, critical_duration=1, window_size=20)
+    wrapped = gate.wrap(lambda state: {"answer": "identical saturating text"})
+
+    emission_turn: int | None = None
+    for turn in range(1, 41):
+        wrapped({"input": "q"})
+        if gate.certificates and emission_turn is None:
+            emission_turn = turn
+            # Don't break — continue evaluating so the assertion also
+            # catches a regression that rewrites the conclusion on
+            # later wrap() calls.
+
+    assert emission_turn is not None, "expected a certificate within 40 turns"
+    # Ensure fixture actually exercises post-emission turns.
+    assert 40 - emission_turn >= 5, (
+        f"fixture too tight: only {40 - emission_turn} post-emission turns"
+    )
+    assert gate.certificates
+
+    conclusion = gate.certificates[0].conclusion
+    match = re.search(r"after (\d+) measurements", conclusion)
+    assert match is not None, f"conclusion lacks measurement count: {conclusion!r}"
+    reported_n = int(match.group(1))
+
+    # Reported N must equal the total number of measurements the monitor
+    # had processed at the moment the cert was emitted — which is the
+    # turn count itself (one measurement per wrap() call).
+    assert reported_n == emission_turn, (
+        f"conclusion reports N={reported_n} but emission turn was {emission_turn}"
+    )
+
+
+def test_emission_failure_leaves_state_retryable(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Regression for roborev job 790 Medium (sibling of openhands-gates 788).
+
+    If ``_emit_certificate`` raises (e.g. the theorem isn't registered),
+    the gate must NOT be left in a permanent ``is_stagnant=True`` state
+    without a corresponding certificate — the ``was_stagnant`` guard in
+    the next call would otherwise suppress cert emission forever.
+    Build the cert before flipping ``state.is_stagnant`` so a failure
+    keeps the state retryable.
+    """
+    from operon_langgraph_gates import stagnation as module
+
+    gate = _make_gate()
+    wrapped = gate.wrap(lambda state: {"answer": "same response every turn"})
+
+    raise_count = [0]
+    original_emit = module._emit_certificate
+
+    def flaky_emit(*args, **kwargs):  # type: ignore[no-untyped-def]
+        if raise_count[0] == 0:
+            raise_count[0] += 1
+            raise RuntimeError("simulated resolver failure")
+        return original_emit(*args, **kwargs)
+
+    monkeypatch.setattr(module, "_emit_certificate", flaky_emit)
+
+    # Drive the gate to the stagnant transition; first emission fails.
+    import pytest
+
+    with pytest.raises(RuntimeError, match="simulated resolver failure"):
+        for _ in range(6):
+            wrapped({"input": "q"})
+
+    # State after failure: not stagnant, no certificate.
+    assert gate.is_stagnant is False
+    assert gate.certificates == []
+
+    # Later call retries emission with the real _emit_certificate.
+    for _ in range(6):
+        wrapped({"input": "q"})
+    assert gate.is_stagnant is True
+    assert gate.certificates
+
+
+def test_windowed_theorem_resolves_through_upstream_registry() -> None:
+    """Same-process contract: windowed theorem resolves to a callable,
+    distinct from the legacy theorem's callable. Uses the public
+    ``resolve_verify_fn`` API (operon-ai>=0.36.1); no coupling to any
+    underscore-prefixed upstream symbol.
+    """
+    from operon_ai.core.certificate import resolve_verify_fn
+
+    windowed = resolve_verify_fn("behavioral_stability_windowed")
+    legacy = resolve_verify_fn("behavioral_stability")
+
+    assert windowed is not None and callable(windowed)
+    assert legacy is not None and callable(legacy)
+    # Distinct theorems — we added a new entry, didn't alias the old.
+    assert windowed is not legacy
+
+
+def test_windowed_theorem_resolves_without_this_package_imported(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Regression for roborev jobs 780/781/785 Low.
+
+    The user-facing guarantee this package advertises (post-0.36.0) is
+    that any process with ``operon-ai>=0.36.0`` resolves
+    ``behavioral_stability_windowed`` through the canonical
+    ``_THEOREM_FN_PATHS`` — no import of this sibling package required.
+
+    Same-process tests cannot prove that claim: by the time the test
+    runs, prior imports have populated module state, so a regression
+    that accidentally re-introduced an import-time side effect would
+    still pass. Spawn a subprocess that imports *only* ``operon_ai``
+    and asserts the resolver returns a callable. Importantly: do NOT
+    import ``operon_langgraph_gates`` at all, so a future regression
+    that moves registration back to a sibling side-effect fails here.
+
+    Writes the probe with explicit ``encoding="utf-8"`` and ASCII-only
+    content to avoid 780's em-dash / non-UTF-8-locale hazard.
+    """
+    import subprocess
+    import sys
+
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "from operon_ai.core.certificate import Certificate, resolve_verify_fn\n"
+        "\n"
+        "# Exercise both public surfaces the package relies on. (1)\n"
+        "# resolve_verify_fn must be importable and return a callable\n"
+        "# for the windowed theorem — this catches a packaging/export\n"
+        "# regression specific to that alias. (2) Certificate.from_theorem\n"
+        "# must produce a cert that verifies as 'breach' on per-window\n"
+        "# means above the stability threshold — this catches the\n"
+        "# factory's resolution path.\n"
+        "assert callable(resolve_verify_fn('behavioral_stability_windowed')), (\n"
+        "    'public resolve_verify_fn did not return a callable'\n"
+        ")\n"
+        "cert = Certificate.from_theorem(\n"
+        "    theorem='behavioral_stability_windowed',\n"
+        "    parameters={'signal_values': (0.9,), 'threshold': 0.8},\n"
+        "    conclusion='cold-process probe',\n"
+        "    source='test',\n"
+        ")\n"
+        "verification = cert.verify()\n"
+        "assert verification.holds is False, verification\n"
+        "\n"
+        "import sys as _sys\n"
+        "assert 'operon_langgraph_gates' not in _sys.modules, (\n"
+        "    'sibling package was imported as a side effect; resolution "
+        "must not depend on it'\n"
+        ")\n"
+        "print('ok')\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(probe)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert result.stdout.strip().endswith("ok")

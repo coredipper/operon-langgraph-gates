@@ -67,6 +67,19 @@ certs = gate.certificates
 
 Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): *in the paper's setup*, the FULL variant (with `DNARepair`) achieves 100% detection and 100% repair of injected state corruption, vs 0%/0% for RAW and GUARDED. **This package is detection-and-certification only — it does not repair state.** It reformulates the idea as a LangGraph-native invariant gate. [Paper 5 §3](https://github.com/coredipper/operon/blob/main/article/paper5/main.pdf) establishes the preservation-under-compilation framework that the gate's certificate follows. See [`docs/paper-citations.md`](./docs/paper-citations.md) for verbatim quotes and the honest caveat.
 
+## Certificate theorem name and verification
+
+`StagnationGate` emits certificates with theorem name `behavioral_stability_windowed` (not the core's shared `behavioral_stability`). The two differ in how they verify:
+
+- `behavioral_stability` (shared core): `mean(severities) < threshold`. Loses the per-window structure rolling-integral detection operates on.
+- `behavioral_stability_windowed` (shared core, since operon-ai 0.36.0): `max(per_window_severity_means) <= stability_threshold`. Mirrors detection exactly.
+
+Both verifiers are registered in `operon_ai.core.certificate._THEOREM_FN_PATHS`, so deserialized certificates resolve through `_resolve_verify_fn` without this package needing to be imported. Any consumer with `operon-ai>=0.36.0` can round-trip a `behavioral_stability_windowed` certificate correctly.
+
+### Breaking change from pre-alpha prototypes
+
+Earlier builds emitted certificates with theorem name `behavioral_stability`, bound to a locally-attached `_verify_fn`. That shape was semantically wrong — the shared verifier is flat-mean-based, so any cert round-tripped through serialization would silently revert to the wrong replay logic. Consumers that key on `certificate.theorem == "behavioral_stability"` must update to `"behavioral_stability_windowed"`. No migration path; alpha.
+
 ## Try it — HuggingFace Space
 
 [**Operon StagnationGate Demo**](https://huggingface.co/spaces/coredipper/operon-stagnation-gate) — interactive page: pick a preset (identical, diverse, noisy, slow drift), tune the gate parameters, watch `is_stagnant` flip and the certificate appear. Deterministic text trajectories — no LLM calls.

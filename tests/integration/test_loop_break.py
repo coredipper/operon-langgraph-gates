@@ -71,10 +71,12 @@ def test_stagnation_gate_breaks_infinite_loop() -> None:
     assert 3 <= result["turn"] <= 10, (
         f"Expected gate to fire between turns 3 and 10; saw turn={result['turn']}"
     )
-    # A behavioral_stability certificate was emitted at the moment of detection.
+    # A behavioral_stability_windowed certificate was emitted at the moment of
+    # detection. The windowed theorem is distinct from the shared
+    # behavioral_stability so round-tripped certs resolve to our verifier.
     certs = gate.certificates
     assert len(certs) >= 1
-    assert certs[0].theorem == "behavioral_stability"
+    assert certs[0].theorem == "behavioral_stability_windowed"
 
 
 def test_without_gate_loop_hits_recursion_limit() -> None:

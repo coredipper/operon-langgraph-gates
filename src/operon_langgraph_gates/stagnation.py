@@ -58,7 +58,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from operon_ai.core.certificate import Certificate, _verify_behavioral_stability
+from operon_ai.core.certificate import Certificate
 from operon_ai.health.epiplexity import EmbeddingProvider, EpiplexityMonitor
 
 from ._common import EPHEMERAL_THREAD, is_async_callable, thread_id
@@ -253,27 +253,84 @@ class StagnationGate:
             state.low_integral_streak = 0
 
         was_stagnant = state.is_stagnant
-        state.is_stagnant = state.low_integral_streak >= self._critical_duration
+        should_be_stagnant = state.low_integral_streak >= self._critical_duration
 
-        if state.is_stagnant and not was_stagnant:
-            _emit_certificate(state, self._threshold)
+        if should_be_stagnant and not was_stagnant:
+            # Emit the certificate *before* flipping ``state.is_stagnant`` so a
+            # failure (e.g. unregistered theorem) leaves the thread in its
+            # prior non-stagnant state and a later call can retry emission
+            # once the underlying problem is corrected. If we flipped state
+            # first, the ``was_stagnant/not was_stagnant`` guard above would
+            # suppress retry and the thread would be permanently stuck in
+            # ``is_stagnant=True`` without a corresponding certificate.
+            violating_integrals = state.integrals[-self._critical_duration :]
+            window_severity_means = tuple(1.0 - i for i in violating_integrals)
+            cert = _emit_certificate(
+                window_severity_means=window_severity_means,
+                threshold=1.0 - self._threshold,
+                detection_index=len(state.severities),
+                source="operon_langgraph_gates.stagnation",
+            )
+            state.certificates.append(cert)
+        state.is_stagnant = should_be_stagnant
 
 
-def _emit_certificate(state: _ThreadState, threshold: float) -> None:
-    params = MappingProxyType(
-        {
-            "signal_values": tuple(state.severities),
-            "threshold": float(threshold),
-        }
-    )
-    cert = Certificate(
-        theorem="behavioral_stability",
-        parameters=params,
-        conclusion=(
-            f"Stagnation detected after {len(state.severities)} measurements; "
-            f"severity evidence captured for replay verification."
+# A theorem name distinct from the shared ``behavioral_stability`` (which is
+# flat-mean-based). Upstream ``operon_ai.core.certificate`` registers this
+# theorem in its theorem registry, so ``Certificate.from_theorem`` resolves
+# the correct verifier without this package binding to any upstream symbol
+# beyond the public ``Certificate`` class itself.
+_WINDOWED_THEOREM = "behavioral_stability_windowed"
+
+
+def _emit_certificate(
+    *,
+    window_severity_means: tuple[float, ...],
+    threshold: float,
+    detection_index: int,
+    source: str,
+) -> Certificate:
+    """Emit a ``behavioral_stability_windowed`` certificate backed by per-window means.
+
+    ``signal_values`` is the sequence of mean severities over each violating
+    rolling window — one value per window, ``critical_duration`` values total.
+    The replay check is ``max(signal_values) <= threshold``, which mirrors
+    detection's "every one of the last ``critical_duration`` rolling windows
+    was violating" predicate.
+
+    ``threshold`` is the stability threshold in the severity domain (the
+    complement of the detection threshold, ``1 - τ_detect``). This makes the
+    verifier agree with detection at every τ in [0, 1] — the severity-domain
+    and epiplexity-domain predicates are equivalent only when the threshold
+    is translated.
+
+    ``detection_index`` is the total number of evaluations the critic had
+    performed when stagnation was detected (``len(state.severities)`` at emit
+    time). Used only in the human-readable conclusion text so "after N
+    measurements" remains accurate after a long healthy prefix — the
+    evidence slice is narrower than total history.
+
+    Raises ``ValueError`` if ``window_severity_means`` is empty: a stagnation
+    certificate without evidence is a contradiction in terms, and the Pydantic
+    ``critical_duration >= 1`` guarantee makes this unreachable from the gate.
+    """
+    if not window_severity_means:
+        raise ValueError(
+            "window_severity_means must be non-empty; "
+            "a stagnation certificate requires at least one violating window"
+        )
+    return Certificate.from_theorem(
+        theorem=_WINDOWED_THEOREM,
+        parameters=MappingProxyType(
+            {
+                "signal_values": tuple(window_severity_means),
+                "threshold": float(threshold),
+            }
         ),
-        source="operon_langgraph_gates.stagnation",
-        _verify_fn=_verify_behavioral_stability,
+        conclusion=(
+            f"Stagnation detected after {detection_index} measurements; "
+            f"{len(window_severity_means)} violating rolling windows "
+            f"captured for replay verification."
+        ),
+        source=source,
     )
-    state.certificates.append(cert)
