@@ -58,7 +58,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from operon_ai.core.certificate import Certificate
+from operon_ai.core.certificate import Certificate, register_verify_fn
 from operon_ai.health.epiplexity import EmbeddingProvider, EpiplexityMonitor
 
 from ._common import EPHEMERAL_THREAD, is_async_callable, thread_id
@@ -256,11 +256,6 @@ class StagnationGate:
         state.is_stagnant = state.low_integral_streak >= self._critical_duration
 
         if state.is_stagnant and not was_stagnant:
-            # Evidence = the exact aggregates detection operates on. Stagnation
-            # fires when each of the last ``critical_duration`` rolling-window
-            # integrals is below threshold. Emit the per-window severity means
-            # themselves (one per violating window) and verify with a max-based
-            # check — mirroring detection's "every window violates" predicate.
             violating_integrals = state.integrals[-self._critical_duration :]
             window_severity_means = tuple(1.0 - i for i in violating_integrals)
             cert = _emit_certificate(
@@ -270,6 +265,15 @@ class StagnationGate:
                 source="operon_langgraph_gates.stagnation",
             )
             state.certificates.append(cert)
+
+
+# A theorem name unique to the windowed verifier. Reusing the shared
+# ``behavioral_stability`` name would cause deserialized certificates to
+# be re-verified with the core's flat-mean ``_verify_behavioral_stability``
+# (via ``_THEOREM_FN_PATHS`` lookup), silently reintroducing the exact
+# flat-mean semantics this package is replacing. Registering a distinct
+# theorem keeps in-memory and round-tripped certs in sync.
+_WINDOWED_THEOREM = "behavioral_stability_windowed"
 
 
 def _emit_certificate(
@@ -315,7 +319,7 @@ def _emit_certificate(
         }
     )
     return Certificate(
-        theorem="behavioral_stability",
+        theorem=_WINDOWED_THEOREM,
         parameters=params,
         conclusion=(
             f"Stagnation detected after {detection_index} measurements; "
@@ -360,3 +364,11 @@ def _verify_window_max_stability(
         "mean": round(mean_v, 4),
         "n": len(values),
     }
+
+
+# Register the windowed theorem with operon_ai's verify registry so that
+# deserialized certificates (``certificate_from_dict`` and friends) resolve
+# to our verifier instead of returning ``None``. Runs once at import time;
+# ``register_verify_fn`` is idempotent on repeated calls with the same
+# ``(theorem, fn)``.
+register_verify_fn(_WINDOWED_THEOREM, _verify_window_max_stability)

@@ -90,8 +90,10 @@ def test_certificate_emitted_on_stagnation() -> None:
         wrapped({"input": "q"})
     certs = gate.certificates
     assert len(certs) >= 1
-    # The cert carries the theorem name used by operon-ai's behavioral cert.
-    assert certs[0].theorem == "behavioral_stability"
+    # The cert uses a distinct theorem name — ``behavioral_stability_windowed``
+    # — rather than the shared ``behavioral_stability``, so round-tripped
+    # certs don't fall back to the core's flat-mean verifier.
+    assert certs[0].theorem == "behavioral_stability_windowed"
 
 
 def test_certificates_empty_on_healthy_run() -> None:
@@ -446,13 +448,54 @@ def test_certificate_threshold_is_severity_domain_complement() -> None:
 
 
 def test_certificate_conclusion_reports_total_detection_index() -> None:
-    """Conclusion text quotes the total evaluation count at detection,
-    not the evidence-slice length."""
+    """Regression for roborev job 771 Low.
+
+    The conclusion text must quote the total evaluation count at
+    detection, not the evidence-slice length. Parse the number out of
+    the "after N measurements" fragment and assert it equals the
+    integrals-list length at emission (which is what was passed as
+    ``detection_index``).
+    """
+    import re
+
     gate = StagnationGate(threshold=0.2, critical_duration=1, window_size=20)
     wrapped = gate.wrap(lambda state: {"answer": "identical saturating text"})
     for _ in range(25):
         wrapped({"input": "q"})
     assert gate.certificates
-    # Detection fires once the window has filled; total evals >= window_size.
+
     conclusion = gate.certificates[0].conclusion
-    assert "1 violating rolling window" in conclusion or "violating rolling windows" in conclusion
+    # Conclusion must contain the exact "after N measurements" fragment.
+    match = re.search(r"after (\d+) measurements", conclusion)
+    assert match is not None, f"conclusion lacks measurement count: {conclusion!r}"
+    reported_n = int(match.group(1))
+
+    # Reported N must match the evaluation count at which the cert fired.
+    # With window=20, cd=1, detection fires at the first integral that
+    # crosses threshold, which happens once enough context exists — so
+    # N is strictly greater than critical_duration and at least window-sized.
+    assert reported_n > gate._critical_duration
+    assert reported_n >= gate._window_size
+
+
+def test_windowed_theorem_is_registered_for_round_trip_verify() -> None:
+    """Regression for roborev job 771 High.
+
+    The custom verifier must be registered against a unique theorem name,
+    so that a deserialized certificate resolves back to our verifier
+    rather than silently falling back to the core's flat-mean
+    ``_verify_behavioral_stability`` (which is what's registered for the
+    shared ``behavioral_stability`` theorem name).
+    """
+    from operon_ai.core.certificate import _resolve_verify_fn
+
+    from operon_langgraph_gates.stagnation import _verify_window_max_stability
+
+    resolved = _resolve_verify_fn("behavioral_stability_windowed")
+    assert resolved is _verify_window_max_stability
+
+    # And the shared name still resolves to the core's (correctly-named but
+    # flat-mean) verifier — we didn't clobber it.
+    from operon_ai.core.certificate import _verify_behavioral_stability
+
+    assert _resolve_verify_fn("behavioral_stability") is _verify_behavioral_stability
