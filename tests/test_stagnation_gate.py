@@ -492,10 +492,10 @@ def test_certificate_conclusion_reports_exact_detection_index() -> None:
 
 
 def test_windowed_theorem_resolves_through_upstream_registry() -> None:
-    """The windowed theorem is registered in operon_ai's canonical
-    ``_THEOREM_FN_PATHS`` (since operon-ai 0.36.0), so resolution is
-    import-order-independent and needs no local ``register_verify_fn``
-    side effect.
+    """Same-process sanity: windowed theorem resolves to a callable and
+    doesn't clobber the legacy theorem. Fresh-interpreter coverage is in
+    ``test_windowed_theorem_resolves_without_this_package_imported``
+    below — the two tests are complementary, not redundant.
     """
     from operon_ai.core.certificate import (
         _resolve_verify_fn,
@@ -509,3 +509,52 @@ def test_windowed_theorem_resolves_through_upstream_registry() -> None:
     )
     # The shared (flat-mean) theorem is unchanged — we didn't clobber it.
     assert _resolve_verify_fn("behavioral_stability") is _verify_behavioral_stability
+
+
+def test_windowed_theorem_resolves_without_this_package_imported(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Regression for roborev jobs 780/781/785 Low.
+
+    The user-facing guarantee this package advertises (post-0.36.0) is
+    that any process with ``operon-ai>=0.36.0`` resolves
+    ``behavioral_stability_windowed`` through the canonical
+    ``_THEOREM_FN_PATHS`` — no import of this sibling package required.
+
+    Same-process tests cannot prove that claim: by the time the test
+    runs, prior imports have populated module state, so a regression
+    that accidentally re-introduced an import-time side effect would
+    still pass. Spawn a subprocess that imports *only* ``operon_ai``
+    and asserts the resolver returns a callable. Importantly: do NOT
+    import ``operon_langgraph_gates`` at all, so a future regression
+    that moves registration back to a sibling side-effect fails here.
+
+    Writes the probe with explicit ``encoding="utf-8"`` and ASCII-only
+    content to avoid 780's em-dash / non-UTF-8-locale hazard.
+    """
+    import subprocess
+    import sys
+
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import operon_ai  # noqa: F401\n"
+        "from operon_ai.core.certificate import _resolve_verify_fn\n"
+        "fn = _resolve_verify_fn('behavioral_stability_windowed')\n"
+        "assert fn is not None, 'windowed theorem did not resolve'\n"
+        "assert callable(fn), f'resolver returned non-callable: {fn!r}'\n"
+        "import sys as _sys\n"
+        "assert 'operon_langgraph_gates' not in _sys.modules, (\n"
+        "    'sibling package was imported as a side effect; resolution "
+        "must not depend on it'\n"
+        ")\n"
+        "print('ok')\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(probe)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert result.stdout.strip().endswith("ok")
