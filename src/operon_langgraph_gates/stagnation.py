@@ -53,12 +53,12 @@ Usage::
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from operon_ai.core.certificate import Certificate, register_verify_fn
+from operon_ai.core.certificate import Certificate, _verify_behavioral_stability_windowed
 from operon_ai.health.epiplexity import EmbeddingProvider, EpiplexityMonitor
 
 from ._common import EPHEMERAL_THREAD, is_async_callable, thread_id
@@ -267,12 +267,11 @@ class StagnationGate:
             state.certificates.append(cert)
 
 
-# A theorem name unique to the windowed verifier. Reusing the shared
-# ``behavioral_stability`` name would cause deserialized certificates to
-# be re-verified with the core's flat-mean ``_verify_behavioral_stability``
-# (via ``_THEOREM_FN_PATHS`` lookup), silently reintroducing the exact
-# flat-mean semantics this package is replacing. Registering a distinct
-# theorem keeps in-memory and round-tripped certs in sync.
+# A theorem name distinct from the shared ``behavioral_stability`` (which is
+# flat-mean-based). Upstream ``operon_ai.core.certificate`` registers this
+# theorem in ``_THEOREM_FN_PATHS``, so any consumer with ``operon-ai>=0.36``
+# resolves the correct verifier via ``_resolve_verify_fn`` without needing
+# to import this package first.
 _WINDOWED_THEOREM = "behavioral_stability_windowed"
 
 
@@ -327,48 +326,5 @@ def _emit_certificate(
             f"captured for replay verification."
         ),
         source=source,
-        _verify_fn=_verify_window_max_stability,
+        _verify_fn=_verify_behavioral_stability_windowed,
     )
-
-
-def _verify_window_max_stability(
-    params: Mapping[str, Any],
-) -> tuple[bool, dict[str, Any]]:
-    """Replay: every window's mean severity is within the stability bound.
-
-    Stable ⟺ ``max(window_means) <= threshold``. The ``<=`` (not ``<``)
-    mirrors detection's strict ``integral < threshold`` predicate exactly:
-    detection says "stagnant iff integral < τ_d", so "stable iff integral
-    >= τ_d". In the severity domain this becomes ``mean(severity) <= 1 - τ_d``,
-    which is an inclusive upper bound. A strict ``<`` here would misclassify
-    the equality boundary as unstable.
-
-    This mirrors the detection aggregate directly. Using the shared
-    ``operon_ai.core.certificate._verify_behavioral_stability`` (flat
-    ``mean < threshold``) loses the per-window structure: overlapping windows
-    weight interior samples more heavily than a flat mean does, so a flat-mean
-    replay can say stability held even when every rolling window was violating.
-    """
-    values = list(params["signal_values"])
-    threshold = params["threshold"]
-    # Every emitted stagnation certificate has at least one violating window
-    # by construction. Empty ``signal_values`` signals a malformed or
-    # externally-constructed certificate — reject it outright instead of
-    # silently attesting that stability held.
-    if not values:
-        return False, {"max": 0.0, "mean": 0.0, "n": 0, "reason": "empty_evidence"}
-    max_v = max(values)
-    mean_v = sum(values) / len(values)
-    return max_v <= threshold, {
-        "max": round(max_v, 4),
-        "mean": round(mean_v, 4),
-        "n": len(values),
-    }
-
-
-# Register the windowed theorem with operon_ai's verify registry so that
-# deserialized certificates (``certificate_from_dict`` and friends) resolve
-# to our verifier instead of returning ``None``. Runs once at import time;
-# ``register_verify_fn`` is idempotent on repeated calls with the same
-# ``(theorem, fn)``.
-register_verify_fn(_WINDOWED_THEOREM, _verify_window_max_stability)

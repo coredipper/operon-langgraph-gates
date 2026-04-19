@@ -72,11 +72,9 @@ Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/
 `StagnationGate` emits certificates with theorem name `behavioral_stability_windowed` (not the core's shared `behavioral_stability`). The two differ in how they verify:
 
 - `behavioral_stability` (shared core): `mean(severities) < threshold`. Loses the per-window structure rolling-integral detection operates on.
-- `behavioral_stability_windowed` (this package): `max(per_window_severity_means) <= stability_threshold`. Mirrors detection exactly.
+- `behavioral_stability_windowed` (shared core, since operon-ai 0.36.0): `max(per_window_severity_means) <= stability_threshold`. Mirrors detection exactly.
 
-The windowed verifier is registered against `operon_ai.core.certificate`'s `_VERIFY_REGISTRY` at package import time. **In-process verification is transparent**: `certificate.verify()` resolves to the correct verifier whenever this package has been imported.
-
-**Cross-process limitation**: deserializing a `behavioral_stability_windowed` cert in a process that has `operon_ai` installed but has NOT imported `operon_langgraph_gates` will fail to resolve the verifier. The canonical fix is upstreaming `_verify_window_max_stability` into `operon_ai.core.certificate` as a registered theorem path; tracked as a follow-up. Any process that consumes these certs must import `operon_langgraph_gates` (already a runtime requirement for producing them).
+Both verifiers are registered in `operon_ai.core.certificate._THEOREM_FN_PATHS`, so deserialized certificates resolve through `_resolve_verify_fn` without this package needing to be imported. Any consumer with `operon-ai>=0.36.0` can round-trip a `behavioral_stability_windowed` certificate correctly.
 
 ### Breaking change from pre-alpha prototypes
 

@@ -412,13 +412,12 @@ def test_certificate_verify_treats_threshold_equality_as_stable() -> None:
 
 def test_certificate_empty_evidence_is_rejected_not_vacuously_stable() -> None:
     """Empty evidence is malformed, not vacuous. Two-layer defense:
-    emit raises, verify rejects."""
+    emit raises, upstream verify rejects."""
     import pytest
 
-    from operon_langgraph_gates.stagnation import (
-        _emit_certificate,
-        _verify_window_max_stability,
-    )
+    from operon_ai.core.certificate import _verify_behavioral_stability_windowed
+
+    from operon_langgraph_gates.stagnation import _emit_certificate
 
     with pytest.raises(ValueError, match="non-empty"):
         _emit_certificate(
@@ -428,7 +427,7 @@ def test_certificate_empty_evidence_is_rejected_not_vacuously_stable() -> None:
             source="test",
         )
 
-    holds, evidence = _verify_window_max_stability(
+    holds, evidence = _verify_behavioral_stability_windowed(
         {"signal_values": (), "threshold": 0.8}
     )
     assert holds is False
@@ -492,61 +491,21 @@ def test_certificate_conclusion_reports_exact_detection_index() -> None:
     )
 
 
-def test_windowed_theorem_is_registered_for_round_trip_verify() -> None:
-    """Regression for roborev job 771 High.
-
-    The custom verifier must be registered against a unique theorem name,
-    so that a deserialized certificate resolves back to our verifier
-    rather than silently falling back to the core's flat-mean
-    ``_verify_behavioral_stability`` (which is what's registered for the
-    shared ``behavioral_stability`` theorem name).
+def test_windowed_theorem_resolves_through_upstream_registry() -> None:
+    """The windowed theorem is registered in operon_ai's canonical
+    ``_THEOREM_FN_PATHS`` (since operon-ai 0.36.0), so resolution is
+    import-order-independent and needs no local ``register_verify_fn``
+    side effect.
     """
-    from operon_ai.core.certificate import _resolve_verify_fn
+    from operon_ai.core.certificate import (
+        _resolve_verify_fn,
+        _verify_behavioral_stability,
+        _verify_behavioral_stability_windowed,
+    )
 
-    from operon_langgraph_gates.stagnation import _verify_window_max_stability
-
-    resolved = _resolve_verify_fn("behavioral_stability_windowed")
-    assert resolved is _verify_window_max_stability
-
-    # And the shared name still resolves to the core's (correctly-named but
-    # flat-mean) verifier — we didn't clobber it.
-    from operon_ai.core.certificate import _verify_behavioral_stability
-
+    assert (
+        _resolve_verify_fn("behavioral_stability_windowed")
+        is _verify_behavioral_stability_windowed
+    )
+    # The shared (flat-mean) theorem is unchanged — we didn't clobber it.
     assert _resolve_verify_fn("behavioral_stability") is _verify_behavioral_stability
-
-
-def test_windowed_theorem_resolves_after_cold_import(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """Sibling-sync regression (mirror of openhands-gates 776 Medium).
-
-    In-process registration via ``register_verify_fn`` is sufficient for
-    any consumer that has imported this package. Prove the claim by
-    spawning a subprocess that cold-imports the package and asks
-    ``_resolve_verify_fn`` to look up the windowed theorem.
-
-    True cross-process resolution (a process with operon_ai installed
-    but no import of this package) requires upstreaming the theorem
-    into ``operon_ai.core.certificate._THEOREM_FN_PATHS`` — tracked as
-    a follow-up.
-    """
-    import subprocess
-    import sys
-
-    probe = tmp_path / "probe.py"
-    probe.write_text(
-        "import operon_langgraph_gates  # noqa: F401 — triggers register_verify_fn\n"
-        "from operon_ai.core.certificate import _resolve_verify_fn\n"
-        "from operon_langgraph_gates.stagnation import _verify_window_max_stability\n"
-        "fn = _resolve_verify_fn('behavioral_stability_windowed')\n"
-        "assert fn is _verify_window_max_stability, f'got {fn!r}'\n"
-        "print('ok')\n"
-    )
-    result = subprocess.run(
-        [sys.executable, str(probe)],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, (
-        f"subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
-    )
-    assert result.stdout.strip().endswith("ok")
