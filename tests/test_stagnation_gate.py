@@ -447,35 +447,43 @@ def test_certificate_threshold_is_severity_domain_complement() -> None:
     assert cert.parameters["threshold"] == 1.0 - gate._threshold
 
 
-def test_certificate_conclusion_reports_total_detection_index() -> None:
-    """Regression for roborev job 771 Low.
+def test_certificate_conclusion_reports_exact_detection_index() -> None:
+    """Regression for roborev jobs 771 Low and 773 Low.
 
-    The conclusion text must quote the total evaluation count at
-    detection, not the evidence-slice length. Parse the number out of
-    the "after N measurements" fragment and assert it equals the
-    integrals-list length at emission (which is what was passed as
-    ``detection_index``).
+    The conclusion text must quote the *exact* evaluation count at
+    detection — the severities-list length at the moment the cert was
+    emitted. Bounds-only assertions (``N > critical_duration``,
+    ``N >= window_size``) would still pass if the code regressed to
+    reporting some other large number (e.g. the final loop count). Pin
+    the assertion to equality by capturing the cert at its first
+    appearance and comparing N to the integrals-length at that turn.
     """
     import re
 
     gate = StagnationGate(threshold=0.2, critical_duration=1, window_size=20)
     wrapped = gate.wrap(lambda state: {"answer": "identical saturating text"})
-    for _ in range(25):
+
+    emission_turn: int | None = None
+    for turn in range(1, 40):
         wrapped({"input": "q"})
+        if gate.certificates and emission_turn is None:
+            emission_turn = turn
+            break
+
+    assert emission_turn is not None, "expected a certificate within 40 turns"
     assert gate.certificates
 
     conclusion = gate.certificates[0].conclusion
-    # Conclusion must contain the exact "after N measurements" fragment.
     match = re.search(r"after (\d+) measurements", conclusion)
     assert match is not None, f"conclusion lacks measurement count: {conclusion!r}"
     reported_n = int(match.group(1))
 
-    # Reported N must match the evaluation count at which the cert fired.
-    # With window=20, cd=1, detection fires at the first integral that
-    # crosses threshold, which happens once enough context exists — so
-    # N is strictly greater than critical_duration and at least window-sized.
-    assert reported_n > gate._critical_duration
-    assert reported_n >= gate._window_size
+    # Reported N must equal the total number of measurements the monitor
+    # had processed at the moment the cert was emitted — which is the
+    # turn count itself (one measurement per wrap() call).
+    assert reported_n == emission_turn, (
+        f"conclusion reports N={reported_n} but emission turn was {emission_turn}"
+    )
 
 
 def test_windowed_theorem_is_registered_for_round_trip_verify() -> None:
