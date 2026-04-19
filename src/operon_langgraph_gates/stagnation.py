@@ -53,12 +53,12 @@ Usage::
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from operon_ai.core.certificate import Certificate, _verify_behavioral_stability
+from operon_ai.core.certificate import Certificate
 from operon_ai.health.epiplexity import EmbeddingProvider, EpiplexityMonitor
 
 from ._common import EPHEMERAL_THREAD, is_async_callable, thread_id
@@ -256,24 +256,107 @@ class StagnationGate:
         state.is_stagnant = state.low_integral_streak >= self._critical_duration
 
         if state.is_stagnant and not was_stagnant:
-            _emit_certificate(state, self._threshold)
+            # Evidence = the exact aggregates detection operates on. Stagnation
+            # fires when each of the last ``critical_duration`` rolling-window
+            # integrals is below threshold. Emit the per-window severity means
+            # themselves (one per violating window) and verify with a max-based
+            # check — mirroring detection's "every window violates" predicate.
+            violating_integrals = state.integrals[-self._critical_duration :]
+            window_severity_means = tuple(1.0 - i for i in violating_integrals)
+            cert = _emit_certificate(
+                window_severity_means=window_severity_means,
+                threshold=1.0 - self._threshold,
+                detection_index=len(state.severities),
+                source="operon_langgraph_gates.stagnation",
+            )
+            state.certificates.append(cert)
 
 
-def _emit_certificate(state: _ThreadState, threshold: float) -> None:
+def _emit_certificate(
+    *,
+    window_severity_means: tuple[float, ...],
+    threshold: float,
+    detection_index: int,
+    source: str,
+) -> Certificate:
+    """Emit a ``behavioral_stability`` certificate backed by per-window means.
+
+    ``signal_values`` is the sequence of mean severities over each violating
+    rolling window — one value per window, ``critical_duration`` values total.
+    The replay check is ``max(signal_values) <= threshold``, which mirrors
+    detection's "every one of the last ``critical_duration`` rolling windows
+    was violating" predicate.
+
+    ``threshold`` is the stability threshold in the severity domain (the
+    complement of the detection threshold, ``1 - τ_detect``). This makes the
+    verifier agree with detection at every τ in [0, 1] — the severity-domain
+    and epiplexity-domain predicates are equivalent only when the threshold
+    is translated.
+
+    ``detection_index`` is the total number of evaluations the critic had
+    performed when stagnation was detected (``len(state.severities)`` at emit
+    time). Used only in the human-readable conclusion text so "after N
+    measurements" remains accurate after a long healthy prefix — the
+    evidence slice is narrower than total history.
+
+    Raises ``ValueError`` if ``window_severity_means`` is empty: a stagnation
+    certificate without evidence is a contradiction in terms, and the Pydantic
+    ``critical_duration >= 1`` guarantee makes this unreachable from the gate.
+    """
+    if not window_severity_means:
+        raise ValueError(
+            "window_severity_means must be non-empty; "
+            "a stagnation certificate requires at least one violating window"
+        )
     params = MappingProxyType(
         {
-            "signal_values": tuple(state.severities),
+            "signal_values": tuple(window_severity_means),
             "threshold": float(threshold),
         }
     )
-    cert = Certificate(
+    return Certificate(
         theorem="behavioral_stability",
         parameters=params,
         conclusion=(
-            f"Stagnation detected after {len(state.severities)} measurements; "
-            f"severity evidence captured for replay verification."
+            f"Stagnation detected after {detection_index} measurements; "
+            f"{len(window_severity_means)} violating rolling windows "
+            f"captured for replay verification."
         ),
-        source="operon_langgraph_gates.stagnation",
-        _verify_fn=_verify_behavioral_stability,
+        source=source,
+        _verify_fn=_verify_window_max_stability,
     )
-    state.certificates.append(cert)
+
+
+def _verify_window_max_stability(
+    params: Mapping[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    """Replay: every window's mean severity is within the stability bound.
+
+    Stable ⟺ ``max(window_means) <= threshold``. The ``<=`` (not ``<``)
+    mirrors detection's strict ``integral < threshold`` predicate exactly:
+    detection says "stagnant iff integral < τ_d", so "stable iff integral
+    >= τ_d". In the severity domain this becomes ``mean(severity) <= 1 - τ_d``,
+    which is an inclusive upper bound. A strict ``<`` here would misclassify
+    the equality boundary as unstable.
+
+    This mirrors the detection aggregate directly. Using the shared
+    ``operon_ai.core.certificate._verify_behavioral_stability`` (flat
+    ``mean < threshold``) loses the per-window structure: overlapping windows
+    weight interior samples more heavily than a flat mean does, so a flat-mean
+    replay can say stability held even when every rolling window was violating.
+    """
+    values = list(params["signal_values"])
+    threshold = params["threshold"]
+    # Every emitted stagnation certificate has at least one violating window
+    # by construction. Empty ``signal_values`` signals a malformed or
+    # externally-constructed certificate — reject it outright instead of
+    # silently attesting that stability held.
+    if not values:
+        return False, {"max": 0.0, "mean": 0.0, "n": 0, "reason": "empty_evidence"}
+    max_v = max(values)
+    mean_v = sum(values) / len(values)
+    return max_v <= threshold, {
+        "max": round(max_v, 4),
+        "mean": round(mean_v, 4),
+        "n": len(values),
+    }
