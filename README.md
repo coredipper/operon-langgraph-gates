@@ -67,6 +67,21 @@ certs = gate.certificates
 
 Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): *in the paper's setup*, the FULL variant (with `DNARepair`) achieves 100% detection and 100% repair of injected state corruption, vs 0%/0% for RAW and GUARDED. **This package is detection-and-certification only — it does not repair state.** It reformulates the idea as a LangGraph-native invariant gate. [Paper 5 §3](https://github.com/coredipper/operon/blob/main/article/paper5/main.pdf) establishes the preservation-under-compilation framework that the gate's certificate follows. See [`docs/paper-citations.md`](./docs/paper-citations.md) for verbatim quotes and the honest caveat.
 
+## Certificate theorem name and verification
+
+`StagnationGate` emits certificates with theorem name `behavioral_stability_windowed` (not the core's shared `behavioral_stability`). The two differ in how they verify:
+
+- `behavioral_stability` (shared core): `mean(severities) < threshold`. Loses the per-window structure rolling-integral detection operates on.
+- `behavioral_stability_windowed` (this package): `max(per_window_severity_means) <= stability_threshold`. Mirrors detection exactly.
+
+The windowed verifier is registered against `operon_ai.core.certificate`'s `_VERIFY_REGISTRY` at package import time. **In-process verification is transparent**: `certificate.verify()` resolves to the correct verifier whenever this package has been imported.
+
+**Cross-process limitation**: deserializing a `behavioral_stability_windowed` cert in a process that has `operon_ai` installed but has NOT imported `operon_langgraph_gates` will fail to resolve the verifier. The canonical fix is upstreaming `_verify_window_max_stability` into `operon_ai.core.certificate` as a registered theorem path; tracked as a follow-up. Any process that consumes these certs must import `operon_langgraph_gates` (already a runtime requirement for producing them).
+
+### Breaking change from pre-alpha prototypes
+
+Earlier builds emitted certificates with theorem name `behavioral_stability`, bound to a locally-attached `_verify_fn`. That shape was semantically wrong — the shared verifier is flat-mean-based, so any cert round-tripped through serialization would silently revert to the wrong replay logic. Consumers that key on `certificate.theorem == "behavioral_stability"` must update to `"behavioral_stability_windowed"`. No migration path; alpha.
+
 ## Try it — HuggingFace Space
 
 [**Operon StagnationGate Demo**](https://huggingface.co/spaces/coredipper/operon-stagnation-gate) — interactive page: pick a preset (identical, diverse, noisy, slow drift), tune the gate parameters, watch `is_stagnant` flip and the certificate appear. Deterministic text trajectories — no LLM calls.

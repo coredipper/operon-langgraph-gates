@@ -468,9 +468,15 @@ def test_certificate_conclusion_reports_exact_detection_index() -> None:
         wrapped({"input": "q"})
         if gate.certificates and emission_turn is None:
             emission_turn = turn
-            break
+            # Don't break — continue evaluating so the assertion also
+            # catches a regression that rewrites the conclusion on
+            # later wrap() calls.
 
     assert emission_turn is not None, "expected a certificate within 40 turns"
+    # Ensure fixture actually exercises post-emission turns.
+    assert 40 - emission_turn >= 5, (
+        f"fixture too tight: only {40 - emission_turn} post-emission turns"
+    )
     assert gate.certificates
 
     conclusion = gate.certificates[0].conclusion
@@ -507,3 +513,40 @@ def test_windowed_theorem_is_registered_for_round_trip_verify() -> None:
     from operon_ai.core.certificate import _verify_behavioral_stability
 
     assert _resolve_verify_fn("behavioral_stability") is _verify_behavioral_stability
+
+
+def test_windowed_theorem_resolves_after_cold_import(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Sibling-sync regression (mirror of openhands-gates 776 Medium).
+
+    In-process registration via ``register_verify_fn`` is sufficient for
+    any consumer that has imported this package. Prove the claim by
+    spawning a subprocess that cold-imports the package and asks
+    ``_resolve_verify_fn`` to look up the windowed theorem.
+
+    True cross-process resolution (a process with operon_ai installed
+    but no import of this package) requires upstreaming the theorem
+    into ``operon_ai.core.certificate._THEOREM_FN_PATHS`` — tracked as
+    a follow-up.
+    """
+    import subprocess
+    import sys
+
+    probe = tmp_path / "probe.py"
+    probe.write_text(
+        "import operon_langgraph_gates  # noqa: F401 — triggers register_verify_fn\n"
+        "from operon_ai.core.certificate import _resolve_verify_fn\n"
+        "from operon_langgraph_gates.stagnation import _verify_window_max_stability\n"
+        "fn = _resolve_verify_fn('behavioral_stability_windowed')\n"
+        "assert fn is _verify_window_max_stability, f'got {fn!r}'\n"
+        "print('ok')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, str(probe)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"subprocess failed:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert result.stdout.strip().endswith("ok")
