@@ -418,7 +418,6 @@ def test_certificate_empty_evidence_is_rejected_not_vacuously_stable() -> None:
     than importing the underscored verifier directly.
     """
     import pytest
-
     from operon_ai.core.certificate import resolve_verify_fn
 
     from operon_langgraph_gates.stagnation import _emit_certificate
