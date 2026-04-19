@@ -269,39 +269,10 @@ class StagnationGate:
 
 # A theorem name distinct from the shared ``behavioral_stability`` (which is
 # flat-mean-based). Upstream ``operon_ai.core.certificate`` registers this
-# theorem in ``_THEOREM_FN_PATHS``, so any consumer with ``operon-ai>=0.36``
-# resolves the correct verifier via the canonical registry without needing
-# to import this package first.
+# theorem in its theorem registry, so ``Certificate.from_theorem`` resolves
+# the correct verifier without this package binding to any upstream symbol
+# beyond the public ``Certificate`` class itself.
 _WINDOWED_THEOREM = "behavioral_stability_windowed"
-
-
-def _resolve_windowed_verifier() -> Callable[[Any], tuple[bool, dict[str, Any]]]:
-    """Deferred, guarded lookup of the windowed theorem's verify function.
-
-    The lookup is intentionally *not* performed at module import time.
-    If a future operon-ai release renames or removes the internal
-    resolver while keeping the theorem contract stable, the package
-    still imports cleanly, and callers get a clear ``RuntimeError``
-    pointing at the contract rather than an obscure ``ImportError``
-    at ``import operon_langgraph_gates``. No compatibility shim claims
-    to cover the hypothetical — this is an escape hatch, not a
-    polyfill.
-    """
-    try:
-        from operon_ai.core.certificate import _resolve_verify_fn
-    except ImportError as e:  # pragma: no cover — defensive
-        raise RuntimeError(
-            f"cannot resolve theorem {_WINDOWED_THEOREM!r}: operon-ai "
-            f"does not expose the theorem resolver ({e}). "
-            f"operon-ai>=0.36.0 is required."
-        ) from e
-    fn = _resolve_verify_fn(_WINDOWED_THEOREM)
-    if fn is None:
-        raise RuntimeError(
-            f"theorem {_WINDOWED_THEOREM!r} is not registered in the "
-            f"operon_ai theorem registry; operon-ai>=0.36.0 is required."
-        )
-    return fn
 
 
 def _emit_certificate(
@@ -311,7 +282,7 @@ def _emit_certificate(
     detection_index: int,
     source: str,
 ) -> Certificate:
-    """Emit a ``behavioral_stability`` certificate backed by per-window means.
+    """Emit a ``behavioral_stability_windowed`` certificate backed by per-window means.
 
     ``signal_values`` is the sequence of mean severities over each violating
     rolling window — one value per window, ``critical_duration`` values total.
@@ -340,21 +311,18 @@ def _emit_certificate(
             "window_severity_means must be non-empty; "
             "a stagnation certificate requires at least one violating window"
         )
-    verify_fn = _resolve_windowed_verifier()
-    params = MappingProxyType(
-        {
-            "signal_values": tuple(window_severity_means),
-            "threshold": float(threshold),
-        }
-    )
-    return Certificate(
+    return Certificate.from_theorem(
         theorem=_WINDOWED_THEOREM,
-        parameters=params,
+        parameters=MappingProxyType(
+            {
+                "signal_values": tuple(window_severity_means),
+                "threshold": float(threshold),
+            }
+        ),
         conclusion=(
             f"Stagnation detected after {detection_index} measurements; "
             f"{len(window_severity_means)} violating rolling windows "
             f"captured for replay verification."
         ),
         source=source,
-        _verify_fn=verify_fn,
     )
