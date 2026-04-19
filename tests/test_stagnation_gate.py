@@ -464,7 +464,7 @@ def test_certificate_conclusion_reports_exact_detection_index() -> None:
     wrapped = gate.wrap(lambda state: {"answer": "identical saturating text"})
 
     emission_turn: int | None = None
-    for turn in range(1, 40):
+    for turn in range(1, 41):
         wrapped({"input": "q"})
         if gate.certificates and emission_turn is None:
             emission_turn = turn
