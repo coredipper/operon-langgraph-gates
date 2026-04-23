@@ -43,8 +43,10 @@ graph.add_conditional_edges(
 certs = gate.certificates
 # For thread-scoped views use gate.is_stagnant_for(thread_id_) /
 # gate.integrals_for(thread_id_). The gate falls back to an internal
-# ephemeral-thread id (__ephemeral__) when no config is passed; this
-# id is an implementation detail, not part of the public API.
+# ephemeral-thread id (__ephemeral__) whenever no thread_id can be
+# extracted from the LangGraph config/runtime at the wrapped node
+# (e.g. no config argument, or a config with no configurable.thread_id);
+# this id is an implementation detail, not part of the public API.
 ```
 
 Backed by [Paper 4 §4.3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): convergence/false-stagnation accuracy **0.960** with real sentence embeddings (all-MiniLM-L6-v2, N = 300 trials). See [`docs/paper-citations.md`](./docs/paper-citations.md) for the full citation record, including the loop-detection caveat and a pointer to the archived benchmark data.
