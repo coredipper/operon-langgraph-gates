@@ -67,6 +67,18 @@ certs = gate.certificates
 
 Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): *in the paper's setup*, the FULL variant (with `DNARepair`) achieves 100% detection and 100% repair of injected state corruption, vs 0%/0% for RAW and GUARDED. **This package is detection-and-certification only — it does not repair state.** It reformulates the idea as a LangGraph-native invariant gate. [Paper 5 §3](https://github.com/coredipper/operon/blob/main/article/paper5/main.pdf) establishes the preservation-under-compilation framework that the gate's certificate follows. See [`docs/paper-citations.md`](./docs/paper-citations.md) for verbatim quotes and the honest caveat.
 
+## Theoretical basis
+
+Both gates are a discrete-state port of the rolling-past / rolling-future reliability loop that has been standard in robotics state estimation since [Kaess et al. 2012](https://dspace.mit.edu/handle/1721.1/71582) (iSAM2) and is formalised in [Dellaert & Kaess 2017](https://www.cs.cmu.edu/~kaess/pub/Dellaert17fnt.pdf) (*Factor Graphs for Robot Perception*). A recent [GTSAM blog post](https://gtsam.org/2026/04/21/factor-graphs-and-world-models.html) frames that loop — **STAG**: Sense-Think-Act with Graphs — as a concrete structured instance of an energy-based world model.
+
+In that vocabulary:
+
+- `StagnationGate` is the discrete-state analogue of a **past-graph fixed-lag smoother**. The per-window severity means are measurement-factor residuals; the smoothed predicate `max(signal_values) ≤ threshold` is the zero-residual MAP decision over the last `history` steps. This is an LLM-agent port of the same check that decides in a SLAM front-end whether a robot's belief has stopped moving.
+- `IntegrityGate` is a **dynamics-residual check**: user-defined invariants play the role of the dynamics model's consistency factors, and a violation at a wrapped node is a positive residual routed onto a conditional edge. The certificate is the replayable record of that residual.
+- Exchanging certificates between agents (e.g. via Operon's A2A codec) corresponds to **factor joining along shared theorem variables** — the cross-agent graph-merge operation used in distributed-SLAM systems.
+
+This is a porting exercise, not new math. What is new is running the loop over symbolic LLM-agent state with a fixed verifier instead of gradient-based smoothing; see [paper 6 appendix §8](https://github.com/coredipper/operon/blob/main/article/paper6/sections/08-factor-graphs.tex) for the full term-by-term mapping, the worked example, and an explicit record of where the analogy stops. The scope-discipline rule inherited from the framing: **factors and topology are fixed; only the theorem set grows** — no learned factors, no horizon > 1 planning graphs.
+
 ## Certificate theorem name and verification
 
 `StagnationGate` emits certificates with theorem name `behavioral_stability_windowed` (not the core's shared `behavioral_stability`). The two differ in how they verify:
