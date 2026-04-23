@@ -19,7 +19,7 @@ Both gates run **inside** the graph: they route conditional edges and can short-
 pip install operon-langgraph-gates
 ```
 
-Requires `operon-ai>=0.34.4` and `langgraph>=1.0`.
+Requires `operon-ai>=0.36.1` and `langgraph>=1.0`.
 
 ## Quickstart
 
@@ -30,16 +30,23 @@ from langgraph.graph import StateGraph
 from operon_langgraph_gates import StagnationGate
 
 graph = StateGraph(State)
-graph.add_node("think", StagnationGate.wrap(think_fn, threshold=0.1, history=10))
+gate = StagnationGate(threshold=0.2, critical_duration=3)
+graph.add_node("think", gate.wrap(think_fn))
 
 # Or attach to a conditional edge (route loop-detected runs elsewhere)
 graph.add_conditional_edges(
     "think",
-    StagnationGate.edge(forward="answer", break_to="escalate", threshold=0.1),
+    gate.edge(forward="answer", break_to="escalate"),
 )
 
-# Certificates collected from the run
-certs = StagnationGate.collect(graph)
+# All certificates the gate has emitted (across all threads)
+certs = gate.certificates
+# For thread-scoped views use gate.is_stagnant_for(thread_id_) /
+# gate.integrals_for(thread_id_). The gate falls back to an internal
+# ephemeral-thread id (__ephemeral__) whenever no thread_id can be
+# extracted from the LangGraph config/runtime at the wrapped node
+# (e.g. no config argument, or a config with no configurable.thread_id);
+# this id is an implementation detail, not part of the public API.
 ```
 
 Backed by [Paper 4 §4.3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): convergence/false-stagnation accuracy **0.960** with real sentence embeddings (all-MiniLM-L6-v2, N = 300 trials). See [`docs/paper-citations.md`](./docs/paper-citations.md) for the full citation record, including the loop-detection caveat and a pointer to the archived benchmark data.
@@ -66,6 +73,41 @@ certs = gate.certificates
 ```
 
 Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): *in the paper's setup*, the FULL variant (with `DNARepair`) achieves 100% detection and 100% repair of injected state corruption, vs 0%/0% for RAW and GUARDED. **This package is detection-and-certification only — it does not repair state.** It reformulates the idea as a LangGraph-native invariant gate. [Paper 5 §3](https://github.com/coredipper/operon/blob/main/article/paper5/main.pdf) establishes the preservation-under-compilation framework that the gate's certificate follows. See [`docs/paper-citations.md`](./docs/paper-citations.md) for verbatim quotes and the honest caveat.
+
+## Theoretical basis
+
+Both gates are a discrete-state port of the rolling-past reliability loop that has been standard in robotics state estimation since [Kaess et al. 2012](https://dspace.mit.edu/handle/1721.1/71582) (iSAM2) and is formalised in [Dellaert & Kaess 2017](https://www.cs.cmu.edu/~kaess/pub/Dellaert17fnt.pdf) (*Factor Graphs for Robot Perception*). A recent [GTSAM blog post](https://gtsam.org/2026/04/21/factor-graphs-and-world-models.html) frames that loop — **STAG**: Sense-Think-Act with Graphs — as a concrete structured instance of an energy-based world model.
+
+### Scope (normative for this package)
+
+What this repository actually commits to under the factor-graph framing:
+
+- **Binding**: `StagnationGate` replay equivalence — a `behavioral_stability_windowed` certificate emitted by the gate must verify identically offline when passed its own parameters. The emitted certificate parameters are in the **severity domain**, not the integral domain: `signal_values = tuple(1.0 - i for i in state.integrals[-critical_duration:])` and `threshold = 1.0 - detection_threshold` (see `src/operon_langgraph_gates/stagnation.py:266-269`), which keeps the replay predicate aligned with `operon_ai`'s shared `behavioral_stability_windowed` verifier semantics (`max(signal_values) ≤ threshold`).
+- **Binding**: `IntegrityGate` frozen-result replay — a `langgraph_state_integrity` certificate's parameters are exactly `invariant_results: tuple[(str, bool), ...]` and `all_passed: False` (see `_make_certificate` in `src/operon_langgraph_gates/integrity.py`); replay must reproduce the same boolean vector. Node output is **not** captured in the certificate payload. Two notes on the `name` field in `(name, passed)`: (i) names are **descriptive labels only**, derived from `inv.__name__` at emit time; replay never resolves them back to live invariants, so lambdas (`<lambda>`) and duplicate names do not break replay correctness — they just collapse to lossy labels in logs and UIs. Treat them as descriptive, not as stable identifiers. (ii) exceptions raised inside an invariant are coerced to `False`, and neither the certificate nor the replay surfaces the offending state or the exception detail.
+- **Non-binding**: no cross-agent inference or factor-graph joining is implemented in this package. Nothing below promises any behaviour beyond what is replayable from the emitted certificates.
+- **Non-binding**: the factor-graph vocabulary is explanatory. Any analogy mapping in the next subsection can be re-tagged as *analogy only* without breaking any contract in this repository.
+
+### Mapping (explanatory, not normative)
+
+- `StagnationGate` is the discrete-state analogue of a **past-graph fixed-lag smoother**. Concretely: on each turn, `EpiplexityMonitor.measure()` emits a scalar `epiplexic_integral` that is stored in `state.integrals`; the detector fires when the last `critical_duration` integrals fall below `detection_threshold` (`src/operon_langgraph_gates/stagnation.py:250-256`). At emission, that integral slice is converted to the severity domain via `1.0 - integral` and shipped in the certificate as `signal_values`, with the threshold also translated to `1.0 - detection_threshold` (`stagnation.py:266-269`). The offline replay predicate `max(signal_values) ≤ threshold` is therefore a translated, not raw, replay of the gate's decision — the translation is part of the replay contract and is required to match `operon_ai`'s shared `behavioral_stability_windowed` verifier semantics.
+- `IntegrityGate` is a **dynamics-residual check**: user-defined invariants play the role of the dynamics model's consistency factors, and a violation at a wrapped node is a positive residual routed onto a conditional edge. The certificate is the replayable record of that residual — specifically the `(name, passed)` vector over invariants and the `all_passed` flag, as emitted by `_make_certificate`. Capturing the offending node output is a deliberate non-goal in the current schema (privacy/redaction would need a separate design); the cert fixes *which* invariants failed, not *what* triggered them.
+
+### Ecosystem note (out of this repository)
+
+Operon's A2A certificate codec (in the [operon repo](https://github.com/coredipper/operon), `operon_ai/convergence/a2a_certificate.py`) transports certificates as `DataPart` payloads and handles graceful degradation for unknown theorems. Under the STAG framing that is a transport-layer analogy of factor joining along shared theorem variables, but the codec does *not* maintain an internal factor graph or perform joint inference, and **no A2A integration exists in this gates repository**. The `Certificate` objects this package emits are structurally compatible with that codec because both sides depend on `operon-ai` for the serialisation shape, but **there is no cross-repo compatibility test or pinned version pair in this package**, so treat this as motivation only — not as an enforced interface contract. If you need A2A-round-trip guarantees, pin a specific `operon-ai` version and add your own compatibility test.
+
+### Follow-up checklist for maintainers
+
+If the code changes, the bindings in *Scope (normative for this package)* above must be re-verified. Checklist items are keyed to stable symbols, not line numbers, so they survive ordinary refactors:
+
+1. `StagnationGate` — if *either* `_emit_certificate` (the integral-to-severity translation and emitted parameter names `signal_values`, `threshold`) *or* `_observe` (the detection predicate `integral < threshold`, the streak counting, and the `critical_duration` slice at emission) changes, update the *StagnationGate replay equivalence* scope entry and add or update an end-to-end test that exercises both the detection path and the replay predicate so detection changes cannot silently drift past the checklist.
+2. `IntegrityGate` — if `_make_certificate` (in `integrity.py`) changes the shape of `invariant_results` or `all_passed`, update the *IntegrityGate frozen-result replay* scope entry; and in the same change, update or add tests that cover: (a) label derivation from `inv.__name__` including the lambda / duplicate-name cases (treated as lossy labels, not identifiers); (b) exception-coerced-to-`False` behaviour; (c) serialization round-trip of `(name, passed)` pairs. If callers ever start round-tripping `name` back to a callable (e.g. an executable replay), introduce an explicit caller-supplied identifier and upgrade the binding before merging.
+3. A2A — if A2A compatibility becomes a binding claim (e.g. a pinned `operon-ai` version range + a cross-repo compatibility test), move the ecosystem note out of *out-of-repo* and into *Scope (normative)* with the pinned range listed; otherwise keep it informational.
+4. Theorem-name changes are **repo-wide**, not README-only. If either `behavioral_stability_windowed` or `langgraph_state_integrity` is renamed in `operon-ai`, the following surfaces must all change in lockstep: this README (the quickstart text and the *Certificate theorem name and verification* section), `src/operon_langgraph_gates/__init__.py` and `stagnation.py` / `integrity.py` (emission sites), `scripts/build_examples.py` (currently references `langgraph_state_integrity` at 3 places), and `huggingface/space-stagnation-gate/app.py` (currently still references the pre-0.36 `behavioral_stability` name — known drift, fix when the theorem-rename PR next touches it). Prefer a single source of truth (e.g. a `_THEOREM` constant re-exported from the package) to prevent this list from growing.
+
+### Honest scope
+
+This is a porting exercise, not new math. What is new is running the loop over symbolic LLM-agent state with a fixed verifier instead of gradient-based smoothing; see [paper 6 appendix §8](https://github.com/coredipper/operon/blob/main/article/paper6/sections/08-factor-graphs.tex) for the full term-by-term mapping, the worked example, and an explicit record of where the analogy stops. The scope-discipline rule inherited from the framing: **factors and topology are fixed; only the theorem set grows** — no learned factors, no horizon > 1 planning graphs.
 
 ## Certificate theorem name and verification
 
