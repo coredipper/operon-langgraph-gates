@@ -69,13 +69,27 @@ Backed by [Paper 4 §4, Table 3](https://github.com/coredipper/operon/blob/main/
 
 ## Theoretical basis
 
-Both gates are a discrete-state port of the rolling-past / rolling-future reliability loop that has been standard in robotics state estimation since [Kaess et al. 2012](https://dspace.mit.edu/handle/1721.1/71582) (iSAM2) and is formalised in [Dellaert & Kaess 2017](https://www.cs.cmu.edu/~kaess/pub/Dellaert17fnt.pdf) (*Factor Graphs for Robot Perception*). A recent [GTSAM blog post](https://gtsam.org/2026/04/21/factor-graphs-and-world-models.html) frames that loop — **STAG**: Sense-Think-Act with Graphs — as a concrete structured instance of an energy-based world model.
+Both gates are a discrete-state port of the rolling-past reliability loop that has been standard in robotics state estimation since [Kaess et al. 2012](https://dspace.mit.edu/handle/1721.1/71582) (iSAM2) and is formalised in [Dellaert & Kaess 2017](https://www.cs.cmu.edu/~kaess/pub/Dellaert17fnt.pdf) (*Factor Graphs for Robot Perception*). A recent [GTSAM blog post](https://gtsam.org/2026/04/21/factor-graphs-and-world-models.html) frames that loop — **STAG**: Sense-Think-Act with Graphs — as a concrete structured instance of an energy-based world model.
 
-In that vocabulary:
+### Scope (normative for this package)
 
-- `StagnationGate` is the discrete-state analogue of a **past-graph fixed-lag smoother**. The per-window severity means are measurement-factor residuals; the smoothed predicate `max(signal_values) ≤ threshold` is the zero-residual MAP decision over the last `critical_duration` rolling windows — i.e. the `state.integrals[-critical_duration:]` slice the gate emits as evidence (`src/operon_langgraph_gates/stagnation.py:266`). This is an LLM-agent port of the same check that decides in a SLAM front-end whether a robot's belief has stopped moving.
-- `IntegrityGate` is a **dynamics-residual check**: user-defined invariants play the role of the dynamics model's consistency factors, and a violation at a wrapped node is a positive residual routed onto a conditional edge. The certificate is the replayable record of that residual.
-- Exchanging certificates between agents (e.g. via Operon's A2A codec) is the transport-layer **analogy** of factor joining along shared theorem variables. The codec moves certificates as `DataPart` payloads and handles graceful degradation for unknown theorems; it does *not* maintain an internal factor graph or perform joint inference. Readers should not treat A2A transport as evidence of implemented cross-agent graph composition.
+What this repository actually commits to under the factor-graph framing:
+
+- **Binding**: `StagnationGate` replay equivalence — a `behavioral_stability_windowed` certificate emitted by the gate must verify identically offline when passed its own parameters.
+- **Binding**: `IntegrityGate` frozen-result replay — a `langgraph_state_integrity` certificate carries `(invariant_name, passed)` pairs for the first violating node output, and replay must reproduce the same boolean vector; exceptions raised by invariants are coerced to `False`, and neither the certificate nor the replay surfaces the offending state or exception detail.
+- **Non-binding**: no cross-agent inference or factor-graph joining is implemented in this package. Nothing below promises any behaviour beyond what is replayable from the emitted certificates.
+- **Non-binding**: the factor-graph vocabulary is explanatory. Any analogy mapping in the next subsection can be re-tagged as *analogy only* without breaking any contract in this repository.
+
+### Mapping (explanatory, not normative)
+
+- `StagnationGate` is the discrete-state analogue of a **past-graph fixed-lag smoother**. Concretely: on each turn, `EpiplexityMonitor.measure()` emits a scalar `epiplexic_integral` that is stored in `state.integrals`; the detector fires when the last `critical_duration` of those integrals fall below the gate's threshold, and the emitted evidence is the slice `state.integrals[-critical_duration:]` (`src/operon_langgraph_gates/stagnation.py:82-88, 266`). The offline verifier reads that same integral slice as `signal_values`, so `max(signal_values) ≤ threshold` is a direct replay of the gate's decision. Note: `state.integrals` stores the α-mixed integral, not raw severity means, and the two can diverge once perplexity is in play (see the comment at `stagnation.py:82-87`); the measurement-factor analogy is cleanest when expressed over integrals, not severities.
+- `IntegrityGate` is a **dynamics-residual check**: user-defined invariants play the role of the dynamics model's consistency factors, and a violation at a wrapped node is a positive residual routed onto a conditional edge. The certificate is the replayable record of that residual — specifically, the first violating node's output plus the `(name, passed)` vector over invariants.
+
+### Ecosystem note (out of this repository)
+
+Operon's A2A certificate codec (in the [operon repo](https://github.com/coredipper/operon), `operon_ai/convergence/a2a_certificate.py`) transports certificates as `DataPart` payloads and handles graceful degradation for unknown theorems. Under the STAG framing that is a transport-layer analogy of factor joining along shared theorem variables, but the codec does *not* maintain an internal factor graph or perform joint inference, and **no A2A integration exists in this gates repository**. Mentioned here only because the certificate format this package emits is A2A-wire-compatible; do not treat this note as a feasibility claim for cross-agent graph composition, which is not in scope here.
+
+### Honest scope
 
 This is a porting exercise, not new math. What is new is running the loop over symbolic LLM-agent state with a fixed verifier instead of gradient-based smoothing; see [paper 6 appendix §8](https://github.com/coredipper/operon/blob/main/article/paper6/sections/08-factor-graphs.tex) for the full term-by-term mapping, the worked example, and an explicit record of where the analogy stops. The scope-discipline rule inherited from the framing: **factors and topology are fixed; only the theorem set grows** — no learned factors, no horizon > 1 planning graphs.
 
