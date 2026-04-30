@@ -60,7 +60,7 @@ NB1_CELLS = [
         `StagnationGate` is the missing native gate: it measures output novelty
         on each node invocation and, once it sees repeated low-novelty
         readings in a row, flips a per-thread flag that a conditional edge
-        can route on — plus it emits a signed `behavioral_stability`
+        can route on — plus it emits a signed `behavioral_stability_windowed`
         certificate with the evidence that fired it.
 
         This notebook shows the pathology in plain LangGraph, then adds the
@@ -154,7 +154,7 @@ NB1_CELLS = [
         ## Inspect the certificate
 
         On the turn where stagnation was first detected, the gate emits one
-        `behavioral_stability` certificate into `gate.certificates`. The
+        `behavioral_stability_windowed` certificate into `gate.certificates`. The
         certificate is a frozen evidence snapshot — `cert.verify()` replays
         the saved severity values against the saved threshold and returns
         `(holds, details)`. For a stagnation cert, `holds == False` — the

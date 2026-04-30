@@ -37,8 +37,8 @@ This module is a thin LangGraph-friendly wrapper over
   across invocations or running concurrent threads doesn't leak state.
 - Async node support via ``_common.is_async_callable`` (also catches
   classes with ``async def __call__``).
-- ``behavioral_stability`` certificate emission on first detection per
-  thread.
+- ``behavioral_stability_windowed`` certificate emission on first detection
+  per thread.
 
 Usage::
 
@@ -234,8 +234,9 @@ class StagnationGate:
         result = state.monitor.measure(text)
 
         # severity = 1 - epiplexity so "mean < threshold" means healthy; large
-        # values flag stagnation pathology (matches the existing operon_ai
-        # ``behavioral_stability`` verify semantics).
+        # values flag stagnation pathology (matches the operon_ai severity-domain
+        # convention shared by both ``behavioral_stability`` and the windowed
+        # variant ``behavioral_stability_windowed`` this gate emits).
         severity = max(0.0, min(1.0, 1.0 - float(result.epiplexity)))
         state.severities.append(severity)
         # Record the exact integral the detection logic routes on, so
