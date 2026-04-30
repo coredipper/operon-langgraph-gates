@@ -19,7 +19,7 @@ Both gates run **inside** the graph: they route conditional edges and can short-
 pip install operon-langgraph-gates
 ```
 
-Requires `operon-ai>=0.36.1` and `langgraph>=1.0`.
+Requires `operon-ai>=0.36.1,<0.40` and `langgraph>=1.0,<2.0`.
 
 ## Quickstart
 
@@ -84,6 +84,7 @@ What this repository actually commits to under the factor-graph framing:
 
 - **Binding**: `StagnationGate` replay equivalence — a `behavioral_stability_windowed` certificate emitted by the gate must verify identically offline when passed its own parameters. The emitted certificate parameters are in the **severity domain**, not the integral domain: `signal_values = tuple(1.0 - i for i in state.integrals[-critical_duration:])` and `threshold = 1.0 - detection_threshold` (see `src/operon_langgraph_gates/stagnation.py:266-269`), which keeps the replay predicate aligned with `operon_ai`'s shared `behavioral_stability_windowed` verifier semantics (`max(signal_values) ≤ threshold`).
 - **Binding**: `IntegrityGate` frozen-result replay — a `langgraph_state_integrity` certificate's parameters are exactly `invariant_results: tuple[(str, bool), ...]` and `all_passed: False` (see `_make_certificate` in `src/operon_langgraph_gates/integrity.py`); replay must reproduce the same boolean vector. Node output is **not** captured in the certificate payload. Two notes on the `name` field in `(name, passed)`: (i) names are **descriptive labels only**, derived from `inv.__name__` at emit time; replay never resolves them back to live invariants, so lambdas (`<lambda>`) and duplicate names do not break replay correctness — they just collapse to lossy labels in logs and UIs. Treat them as descriptive, not as stable identifiers. (ii) exceptions raised inside an invariant are coerced to `False`, and neither the certificate nor the replay surfaces the offending state or the exception detail.
+- **Binding**: A2A round-trip equivalence — under the pinned `operon-ai` range in `pyproject.toml` (`>=0.36.1,<0.40`), a certificate emitted by either gate must round-trip through `operon_ai.convergence.a2a_certificate.{certificate_to_a2a_part, certificate_from_a2a_part}` such that `Certificate.verify()` returns the same result and the parameter dict is preserved exactly. Enforced by `tests/test_a2a_round_trip.py`. Tightening the upper bound on the `operon-ai` pin requires re-running this test against the new range.
 - **Non-binding**: no cross-agent inference or factor-graph joining is implemented in this package. Nothing below promises any behaviour beyond what is replayable from the emitted certificates.
 - **Non-binding**: the factor-graph vocabulary is explanatory. Any analogy mapping in the next subsection can be re-tagged as *analogy only* without breaking any contract in this repository.
 
@@ -92,9 +93,13 @@ What this repository actually commits to under the factor-graph framing:
 - `StagnationGate` is the discrete-state analogue of a **past-graph fixed-lag smoother**. Concretely: on each turn, `EpiplexityMonitor.measure()` emits a scalar `epiplexic_integral` that is stored in `state.integrals`; the detector fires when the last `critical_duration` integrals fall below `detection_threshold` (`src/operon_langgraph_gates/stagnation.py:250-256`). At emission, that integral slice is converted to the severity domain via `1.0 - integral` and shipped in the certificate as `signal_values`, with the threshold also translated to `1.0 - detection_threshold` (`stagnation.py:266-269`). The offline replay predicate `max(signal_values) ≤ threshold` is therefore a translated, not raw, replay of the gate's decision — the translation is part of the replay contract and is required to match `operon_ai`'s shared `behavioral_stability_windowed` verifier semantics.
 - `IntegrityGate` is a **dynamics-residual check**: user-defined invariants play the role of the dynamics model's consistency factors, and a violation at a wrapped node is a positive residual routed onto a conditional edge. The certificate is the replayable record of that residual — specifically the `(name, passed)` vector over invariants and the `all_passed` flag, as emitted by `_make_certificate`. Capturing the offending node output is a deliberate non-goal in the current schema (privacy/redaction would need a separate design); the cert fixes *which* invariants failed, not *what* triggered them.
 
-### Ecosystem note (out of this repository)
+### Ecosystem note (A2A round-trip is enforced)
 
-Operon's A2A certificate codec (in the [operon repo](https://github.com/coredipper/operon), `operon_ai/convergence/a2a_certificate.py`) transports certificates as `DataPart` payloads and handles graceful degradation for unknown theorems. Under the STAG framing that is a transport-layer analogy of factor joining along shared theorem variables, but the codec does *not* maintain an internal factor graph or perform joint inference, and **no A2A integration exists in this gates repository**. The `Certificate` objects this package emits are structurally compatible with that codec because both sides depend on `operon-ai` for the serialisation shape, but **there is no cross-repo compatibility test or pinned version pair in this package**, so treat this as motivation only — not as an enforced interface contract. If you need A2A-round-trip guarantees, pin a specific `operon-ai` version and add your own compatibility test.
+Operon's A2A certificate codec (in the [operon repo](https://github.com/coredipper/operon), `operon_ai/convergence/a2a_certificate.py`) transports certificates as `DataPart` payloads and handles graceful degradation for unknown theorems. Under the STAG framing that is a transport-layer analogy of factor joining along shared theorem variables, but the codec does *not* maintain an internal factor graph or perform joint inference.
+
+The `Certificate` objects this package emits are guaranteed to round-trip through that codec under the pinned `operon-ai` range in `pyproject.toml` (`>=0.36.1,<0.40`). The guarantee is enforced by `tests/test_a2a_round_trip.py`, which drives both gates to emission, encodes their certificates via `certificate_to_a2a_part`, decodes via `certificate_from_a2a_part`, and asserts that `Certificate.verify()` returns the same result and that `parameters` are preserved exactly. The same test verifies that `safe_certificate_from_a2a_part` recovers the cert (not `None`) for both gate-emitted theorem names — i.e., the round-trip works even when the receiver opts into graceful-degradation mode.
+
+This was previously informational; promoted to a binding claim in `0.1.0` per the maintainer checklist. If the upper bound on the `operon-ai` pin is widened, the round-trip test must be re-run against the new range before merging.
 
 ### Follow-up checklist for maintainers
 
@@ -102,7 +107,7 @@ If the code changes, the bindings in *Scope (normative for this package)* above 
 
 1. `StagnationGate` — if *either* `_emit_certificate` (the integral-to-severity translation and emitted parameter names `signal_values`, `threshold`) *or* `_observe` (the detection predicate `integral < threshold`, the streak counting, and the `critical_duration` slice at emission) changes, update the *StagnationGate replay equivalence* scope entry and add or update an end-to-end test that exercises both the detection path and the replay predicate so detection changes cannot silently drift past the checklist.
 2. `IntegrityGate` — if `_make_certificate` (in `integrity.py`) changes the shape of `invariant_results` or `all_passed`, update the *IntegrityGate frozen-result replay* scope entry; and in the same change, update or add tests that cover: (a) label derivation from `inv.__name__` including the lambda / duplicate-name cases (treated as lossy labels, not identifiers); (b) exception-coerced-to-`False` behaviour; (c) serialization round-trip of `(name, passed)` pairs. If callers ever start round-tripping `name` back to a callable (e.g. an executable replay), introduce an explicit caller-supplied identifier and upgrade the binding before merging.
-3. A2A — if A2A compatibility becomes a binding claim (e.g. a pinned `operon-ai` version range + a cross-repo compatibility test), move the ecosystem note out of *out-of-repo* and into *Scope (normative)* with the pinned range listed; otherwise keep it informational.
+3. A2A — the round-trip is binding under the current pinned `operon-ai` range (`>=0.36.1,<0.40`) and is enforced by `tests/test_a2a_round_trip.py`. If `certificate_to_a2a_part` / `certificate_from_a2a_part` change shape upstream, re-run the test against the new range; if the upper bound on the pin is widened, the test must be re-run against the new range before merging. If the `safe_certificate_from_a2a_part` graceful-degradation behaviour is removed upstream, the corresponding sub-test must be removed in lockstep with the pin update.
 4. Theorem-name changes are **repo-wide**, not README-only. If either `behavioral_stability_windowed` or `langgraph_state_integrity` is renamed in `operon-ai`, the following surfaces must all change in lockstep: this README (the quickstart text and the *Certificate theorem name and verification* section), `src/operon_langgraph_gates/__init__.py` and `stagnation.py` / `integrity.py` (emission sites), `scripts/build_examples.py` (currently references `langgraph_state_integrity` at 3 places), and `huggingface/space-stagnation-gate/app.py` (currently still references the pre-0.36 `behavioral_stability` name — known drift, fix when the theorem-rename PR next touches it). Prefer a single source of truth (e.g. a `_THEOREM` constant re-exported from the package) to prevent this list from growing.
 
 ### Honest scope
@@ -131,9 +136,31 @@ Earlier builds emitted certificates with theorem name `behavioral_stability`, bo
 - [`examples/01_stagnation_breaks_loop.ipynb`](./examples/01_stagnation_breaks_loop.ipynb) — reproduces issue #6731 pathology, then fixes it with a ten-line diff.
 - [`examples/02_integrity_catches_drift.ipynb`](./examples/02_integrity_catches_drift.ipynb) — a three-node graph silently corrupts state; `IntegrityGate` catches it with replayable evidence.
 
+## Public API
+
+The committed surface for `0.1.x` is small and explicit:
+
+- **Classes:** `StagnationGate`, `IntegrityGate`.
+- **Methods on each gate:** `wrap(node_fn)`, `edge(forward, break_to)`, `certificates`, `reset()`. `StagnationGate` additionally exposes the global property `is_stagnant`, the per-thread methods `is_stagnant_for(thread_id)` and `integrals_for(thread_id)`. `IntegrityGate` exposes the global property `is_violated` and the per-thread method `is_violated_for(thread_id)`.
+- **Theorem-name constants:** `STAGNATION_THEOREM` (`"behavioral_stability_windowed"`), `INTEGRITY_THEOREM` (`"langgraph_state_integrity"`). Use these instead of hard-coding strings; the underlying private constants `_THEOREM` / `_WINDOWED_THEOREM` are the SSoT and the public re-exports forward to them.
+- **Module attributes:** `__version__`, `__all__`.
+
+Anything underscore-prefixed is **internal** and may change without notice within `0.1.x`. Notable internals callers sometimes touch:
+
+- `_THEOREM` / `_WINDOWED_THEOREM` — module-internal SSoT for theorem names; use `STAGNATION_THEOREM` / `INTEGRITY_THEOREM` instead.
+- `EPHEMERAL_THREAD` (in `_common.py`) — the internal fallback thread-id used whenever no `thread_id` can be extracted from the LangGraph config or runtime at the wrapped node. Confirmed internal in `0.1.0a2` (Roborev #903); see `_common.py:thread_id()` for exact semantics.
+- `_observe`, `_emit_certificate`, `_make_certificate`, `_thread_state` — internal gate machinery; touching these from a caller breaks the binding contract in *Scope (normative)*.
+
+**Stability commitment:**
+
+- `0.1.x` is an alpha series — **breaking changes are still possible**. Each will be documented in `CHANGELOG.md` and (for renamed theorem names) will go through a deprecation cycle wired through `operon-ai`'s theorem registry.
+- The first non-breaking promise lands at `0.1.0` stable. Patches above that (`0.1.1`, `0.1.2`, ...) preserve the public surface above.
+- Breaking changes thereafter increment to `0.2.0` per [SemVer](https://semver.org/).
+- The cross-repo binding to `operon-ai`'s A2A codec is enforced by `tests/test_a2a_round_trip.py` against the pinned range in `pyproject.toml`; widening that pin requires re-running the test against the new range.
+
 ## Status
 
-**Alpha.** API may change before `0.1.0` stable. Feedback welcome via Issues.
+**Alpha.** Public surface is now documented above; breaking changes within `0.1.x` are still possible but will be flagged in `CHANGELOG.md`. Feedback welcome via Issues.
 
 ## License
 

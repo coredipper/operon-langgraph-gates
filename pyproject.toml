@@ -32,7 +32,7 @@ classifiers = [
   "Typing :: Typed",
 ]
 dependencies = [
-  "operon-ai>=0.36.1",
+  "operon-ai>=0.36.1,<0.40",
   "langgraph>=1.0.0,<2.0",
 ]
 

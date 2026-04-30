@@ -14,6 +14,30 @@ Pre-1.0.0 alpha releases follow [PEP 440](https://peps.python.org/pep-0440/).
   re-exported from the package root, so downstream consumers can key on
   the emitted theorem names without hard-coding strings that drift if
   `operon-ai` renames the underlying theorem.
+- A2A round-trip test (`tests/test_a2a_round_trip.py`) promoting the
+  cross-repo binding with `operon-ai`'s certificate codec from
+  *informational* to *enforced*. The test drives both gates to emission,
+  encodes certificates via `certificate_to_a2a_part`, decodes via
+  `certificate_from_a2a_part`, and asserts that `Certificate.verify()`
+  returns the same result and that `parameters` are preserved exactly.
+  The `safe_certificate_from_a2a_part` graceful-degradation path is
+  also covered.
+- README "Public API" section documenting the committed `0.1.x` surface
+  (classes, methods, theorem-name constants, version attributes) and
+  the explicitly-internal complement (underscore-prefixed names,
+  `EPHEMERAL_THREAD`, internal gate machinery). Includes the SemVer
+  stability commitment for `0.1.0` stable and beyond.
+
+### Changed
+
+- `pyproject.toml` `operon-ai` dependency tightened from `>=0.36.1`
+  (no upper bound) to `>=0.36.1,<0.40`, matching the range the new
+  A2A round-trip test was authored against. Widening the pin requires
+  re-running the round-trip test against the new range.
+- README "Ecosystem note" section relabeled from "out of this repository"
+  to "A2A round-trip is enforced" and rewritten to document the binding.
+  Maintainer checklist item 3 updated accordingly: A2A is no longer
+  conditional on a future test, it's the current state.
 
 ### Fixed
 
