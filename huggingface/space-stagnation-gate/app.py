@@ -2,7 +2,7 @@
 
 Walks a visitor through the LangGraph issue #6731 pathology: an agent
 repeats itself, the `StagnationGate` sees the repeat, the gate flips
-``is_stagnant=True``, a `behavioral_stability` certificate is emitted
+``is_stagnant=True``, a `behavioral_stability_windowed` certificate is emitted
 with replayable evidence. Pick a preset, adjust the sliders, click Run —
 no LLM calls, fully deterministic.
 

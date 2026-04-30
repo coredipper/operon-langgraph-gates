@@ -13,8 +13,8 @@ achieves:
 
 Paper 4 calls this "the strongest structural guarantee in the evaluated
 stack" (§4, Table 3, Integrity row). Paper 5 §3 proves preservation of
-the paper's ``state_integrity_verified`` theorem under compilation; this
-module registers a distinct LangGraph-flavored theorem
+certificate-bearing morphisms under compilation in general; this module
+registers a distinct LangGraph-flavored theorem
 (``langgraph_state_integrity``) that is structurally analogous but not
 itself the subject of a preservation proof in the paper. The 100/100
 numbers above apply to the paper's ``DNARepair`` setup on ``Genome``
