@@ -160,7 +160,7 @@ Anything underscore-prefixed is **internal** and may change without notice withi
 
 ## Status
 
-**Alpha.** Public surface is now documented above; breaking changes within `0.1.x` are still possible but will be flagged in `CHANGELOG.md`. Feedback welcome via Issues.
+**Beta — `0.1.0`.** First stable release. Public surface is documented in the section above; `0.1.x` patches preserve it, breaking changes increment to `0.2.0` per [SemVer](https://semver.org/). The cross-repo A2A binding is enforced under the pinned `operon-ai>=0.36.1,<0.40` range. Feedback welcome via Issues.
 
 ## License
 
