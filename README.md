@@ -19,7 +19,7 @@ Both gates run **inside** the graph: they route conditional edges and can short-
 pip install operon-langgraph-gates
 ```
 
-Requires `operon-ai>=0.36.1` and `langgraph>=1.0`.
+Requires `operon-ai>=0.36.1,<0.40` and `langgraph>=1.0,<2.0`.
 
 ## Quickstart
 
@@ -141,7 +141,7 @@ Earlier builds emitted certificates with theorem name `behavioral_stability`, bo
 The committed surface for `0.1.x` is small and explicit:
 
 - **Classes:** `StagnationGate`, `IntegrityGate`.
-- **Methods on each gate:** `wrap(node_fn)`, `edge(forward, break_to)`, `certificates`, `reset()`. `StagnationGate` additionally exposes `is_stagnant_for(thread_id)`, `integrals_for(thread_id)`. `IntegrityGate` exposes `is_violated`.
+- **Methods on each gate:** `wrap(node_fn)`, `edge(forward, break_to)`, `certificates`, `reset()`. `StagnationGate` additionally exposes the global property `is_stagnant`, the per-thread methods `is_stagnant_for(thread_id)` and `integrals_for(thread_id)`. `IntegrityGate` exposes the global property `is_violated` and the per-thread method `is_violated_for(thread_id)`.
 - **Theorem-name constants:** `STAGNATION_THEOREM` (`"behavioral_stability_windowed"`), `INTEGRITY_THEOREM` (`"langgraph_state_integrity"`). Use these instead of hard-coding strings; the underlying private constants `_THEOREM` / `_WINDOWED_THEOREM` are the SSoT and the public re-exports forward to them.
 - **Module attributes:** `__version__`, `__all__`.
 
