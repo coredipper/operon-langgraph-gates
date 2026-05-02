@@ -153,9 +153,8 @@ Anything underscore-prefixed is **internal** and may change without notice withi
 
 **Stability commitment:**
 
-- `0.1.x` is an alpha series — **breaking changes are still possible**. Each will be documented in `CHANGELOG.md` and (for renamed theorem names) will go through a deprecation cycle wired through `operon-ai`'s theorem registry.
-- The first non-breaking promise lands at `0.1.0` stable. Patches above that (`0.1.1`, `0.1.2`, ...) preserve the public surface above.
-- Breaking changes thereafter increment to `0.2.0` per [SemVer](https://semver.org/).
+- `0.1.0` is the first stable release; the `0.1.x` series preserves the public surface above. Any deprecations of theorem names will go through `operon-ai`'s theorem registry and be documented in `CHANGELOG.md`.
+- Breaking changes increment to `0.2.0` per [SemVer](https://semver.org/).
 - The cross-repo binding to `operon-ai`'s A2A codec is enforced by `tests/test_a2a_round_trip.py` against the pinned range in `pyproject.toml`; widening that pin requires re-running the test against the new range.
 
 ## Status
