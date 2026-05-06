@@ -114,6 +114,10 @@ If the code changes, the bindings in *Scope (normative for this package)* above 
 
 This is a porting exercise, not new math. What is new is running the loop over symbolic LLM-agent state with a fixed verifier instead of gradient-based smoothing; see [paper 6 appendix §8](https://github.com/coredipper/operon/blob/main/article/paper6/sections/08-factor-graphs.tex) for the full term-by-term mapping, the worked example, and an explicit record of where the analogy stops. The scope-discipline rule inherited from the framing: **factors and topology are fixed; only the theorem set grows** — no learned factors, no horizon > 1 planning graphs.
 
+### Position vs. existing taxonomies (informational)
+
+[Meng et al. 2026](https://www.preprints.org/manuscript/202604.0428/v2) formalize the agent harness as a six-component tuple `H = (E, T, C, S, L, V)` and survey 110+ papers and 23 systems on a Harness Completeness Matrix. Their matrix scores LangGraph at `E✓ T≈ C≈ S≈ L✗ V✗` — Lifecycle Hooks (`L`) and Evaluation Interface (`V`) absent. `operon-langgraph-gates` provides complementary in-graph hooks and certificate-typed evidence at wrapped-node boundaries: `StagnationGate` emits Bayesian stagnation evidence (Paper 4 §4.3), `IntegrityGate` emits state-integrity invariant results (Paper 4 §4.1). The package is an ecosystem complement, not a wholesale L+V retrofit — replacing LangGraph orchestration is an explicit non-goal (see *Scope (normative)* above).
+
 ## Certificate theorem name and verification
 
 `StagnationGate` emits certificates with theorem name `behavioral_stability_windowed` (not the core's shared `behavioral_stability`). The two differ in how they verify:
