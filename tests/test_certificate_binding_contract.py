@@ -104,12 +104,19 @@ def test_integrity_all_passed_is_exactly_false_on_emission() -> None:
 def test_integrity_invariant_results_are_name_passed_pairs() -> None:
     cert = _drive_integrity_gate_to_violation().certificates[0]
     results = cert.parameters["invariant_results"]
+    # Exact emitted shape: a tuple whose entries are each strictly a
+    # 2-tuple (str, bool) — not merely "unpackable into two", which a
+    # list or custom object would also satisfy and which would let a
+    # regression away from tuple[(str, bool), ...] pass silently.
     assert isinstance(results, tuple) and len(results) >= 1
     for entry in results:
+        assert type(entry) is tuple and len(entry) == 2
         name, passed = entry
-        assert isinstance(name, str)
-        assert isinstance(passed, bool)
-    # Structural equality of the value type: identical (name, passed) pairs
-    # are equal regardless of identity.
-    name0, passed0 = results[0]
-    assert (name0, passed0) == (results[0][0], results[0][1])
+        assert type(name) is str
+        assert type(passed) is bool
+    # Structural-equality / exact-value check against an independently
+    # constructed expected value (not a re-projection of the emitted
+    # entry). The fixture is deterministic: the single invariant
+    # `_has_answer` returns False for an empty answer, so the emitted
+    # vector is exactly this tuple-of-tuples.
+    assert results == (("_has_answer", False),)
