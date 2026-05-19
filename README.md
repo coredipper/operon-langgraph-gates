@@ -127,6 +127,12 @@ This is a porting exercise, not new math. What is new is running the loop over s
 
 Both verifiers are registered in `operon_ai.core.certificate._THEOREM_FN_PATHS`, so deserialized certificates resolve through `_resolve_verify_fn` without this package needing to be imported. Any consumer with `operon-ai>=0.36.0` can round-trip a `behavioral_stability_windowed` certificate correctly.
 
+### Sibling-adapter consumption contract (enforced cross-repo)
+
+The supported way for a downstream Operon adapter to consume this package is exactly: the two public theorem-name constants — `STAGNATION_THEOREM`, `INTEGRITY_THEOREM` — plus the import side-effect of `operon_langgraph_gates.integrity`, which registers `langgraph_state_integrity` in `operon-ai`'s verifier registry. Nothing else (no underscore internals) is part of this contract.
+
+It is enforced from the *consumer* side, not just asserted here: `operon-ai`'s `TestOperonLanggraphGatesDogfood` (`tests/unit/convergence/test_gascity_adapter.py` and `test_agentflow_adapter.py`, [operon-ai #182](https://github.com/coredipper/operon/pull/182)) installs this package as a CI dependency and asserts that a certificate produced through the gascity / agentflow adapters under each constant survives the Beads/Dolt audit-trail JSON render **and** a `certificate_to_dict` → `certificate_from_dict` → `verify()` round-trip with agreement. That test is the executable proof of the portability claim in operon-ai's [external-frameworks §8.4 landscape memo](https://github.com/coredipper/operon/blob/main/docs/site/external-frameworks.md); this section is its consumer-side counterpart. Widening the `operon-ai` pin in `pyproject.toml` requires that contract test (and `tests/test_a2a_round_trip.py`) to pass against the new range.
+
 ### Breaking change from pre-alpha prototypes
 
 Earlier builds emitted certificates with theorem name `behavioral_stability`, bound to a locally-attached `_verify_fn`. That shape was semantically wrong — the shared verifier is flat-mean-based, so any cert round-tripped through serialization would silently revert to the wrong replay logic. Consumers that key on `certificate.theorem == "behavioral_stability"` must update to `"behavioral_stability_windowed"`. No migration path; alpha.

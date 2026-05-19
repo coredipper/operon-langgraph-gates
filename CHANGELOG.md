@@ -8,7 +8,20 @@ Pre-1.0.0 alpha releases follow [PEP 440](https://peps.python.org/pep-0440/).
 
 ## [Unreleased]
 
-_No changes since `0.1.0`._
+### Documentation
+
+- README: new *Sibling-adapter consumption contract (enforced cross-repo)*
+  subsection. Names the supported downstream contract (the two public
+  theorem-name constants + the `operon_langgraph_gates.integrity` import
+  side-effect) and points at its cross-repo enforcement —
+  `operon-ai`'s `TestOperonLanggraphGatesDogfood`
+  ([operon-ai #182](https://github.com/coredipper/operon/pull/182)),
+  which installs this package in CI and asserts a full
+  serialize → deserialize → `verify()` round-trip.
+
+_Docs-only; no functional change to the package. The `0.1.x` public
+surface is unchanged, so this does not warrant a release (per the
+"0.2.0 = breaking changes" policy in the README Public API section)._
 
 ## [0.1.0] — 2026-04-30
 
