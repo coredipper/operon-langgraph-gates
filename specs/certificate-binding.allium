@@ -1,0 +1,131 @@
+-- allium: 3
+-- certificate-binding.allium
+
+-- Scope: the certificate emission + offline-replay/round-trip *binding*
+--   contract of operon-langgraph-gates' two gates. This is the
+--   load-bearing, normative behaviour (README "Scope (normative)").
+-- Includes: StagnationGate / IntegrityGate certificate emission, the
+--   severity-domain translation of stagnation params, the frozen
+--   invariant-result vector for integrity, the two replay-equivalence
+--   invariants, and the A2A codec round-trip contract.
+-- Excludes:
+--   - EpiplexityMonitor internals / epiplexic_integral computation
+--     (operon-ai's domain, not this package's)
+--   - per-thread gate state + thread-id extraction (implementation)
+--   - the HuggingFace demo space and example notebooks (incidental)
+--   - operon-ai's shared verifier *registry* mechanics; only the
+--     observable contract (verify() resolves by theorem name without
+--     importing this package) is stated, not how the registry works.
+
+-- The certificate as emitted by a gate. operon-ai owns the verifier
+-- registry that computes `holds`; here the certificate is the domain
+-- artefact whose emission and replay this package is responsible for.
+entity Certificate {
+    theorem: Stagnation | Integrity   -- discriminator
+    holds: Boolean                    -- outcome of operon-ai's shared offline
+                                      -- verifier, resolved by theorem name
+                                      -- WITHOUT importing this package
+}
+
+-- Wire theorem name: "behavioral_stability_windowed".
+variant Stagnation : Certificate {
+    signal_values: List<Decimal>   -- per-window mean SEVERITY (1 - integral),
+                                 -- translated from the integral domain so
+                                 -- offline replay matches shared semantics
+    threshold: Decimal             -- 1 - detection_threshold (translated)
+}
+
+-- Wire theorem name: "langgraph_state_integrity".
+variant Integrity : Certificate {
+    invariant_results: List<InvariantResult>   -- frozen (name, passed) vector
+    all_passed: Boolean                        -- always false: a certificate
+                                               -- is emitted only on violation
+}
+
+value InvariantResult {
+    name: String        -- descriptive label (invariant function name);
+                        -- NOT a stable identifier — lambdas/duplicates
+                        -- collapse to lossy labels, replay never resolves
+                        -- names back to live invariants
+    passed: Boolean     -- an invariant that raises is coerced to false
+}
+
+entity StagnationGate {
+    detection_threshold: Decimal
+    critical_duration: Integer            -- consecutive sub-threshold windows
+    window_severities: List<Decimal>        -- per-window mean severities over
+                                          -- the violating window (becomes
+                                          -- the certificate's signal_values)
+    is_stagnant: Boolean
+}
+
+entity IntegrityGate {
+    last_invariant_results: List<InvariantResult>
+    is_violated: Boolean
+}
+
+-- ---- Emission ----
+
+rule StagnationCertificateEmitted {
+    when: gate: StagnationGate.is_stagnant becomes true
+    -- Detection fired: the last `critical_duration` rolling windows were
+    -- all sub-threshold. The emitted parameters are translated into the
+    -- severity domain so the certificate is replayable by the shared
+    -- verifier without re-running the monitor.
+    ensures: Stagnation.created(
+        signal_values: gate.window_severities,
+        threshold: 1.0 - gate.detection_threshold,
+        holds: gate.window_severities.all(s => s <= 1.0 - gate.detection_threshold)
+    )
+}
+
+rule IntegrityCertificateEmitted {
+    when: gate: IntegrityGate.is_violated becomes true
+    requires: not gate.last_invariant_results.all(r => r.passed)
+    ensures: Integrity.created(
+        invariant_results: gate.last_invariant_results,
+        all_passed: false,
+        holds: false
+    )
+    @guidance
+        -- The wrapped node's output is deliberately NOT captured in the
+        -- certificate payload; only the (name, passed) vector is frozen.
+        -- This bounds what replay can reconstruct and keeps the payload
+        -- free of arbitrary state.
+}
+
+-- ---- Replay equivalence (the load-bearing binding) ----
+
+invariant StagnationReplayEquivalence {
+    -- An emitted stagnation certificate, verified offline from its OWN
+    -- parameters, reproduces the gate's live decision. Replay predicate:
+    -- max(signal_values) <= threshold, i.e. every window <= threshold.
+    for c in Certificate where theorem = Stagnation:
+        c.holds = c.signal_values.all(v => v <= c.threshold)
+}
+
+invariant IntegrityReplayEquivalence {
+    -- Replay reproduces the same boolean vector: holds iff every recorded
+    -- invariant passed (so, for an emitted certificate, always false).
+    for c in Certificate where theorem = Integrity:
+        c.holds = c.invariant_results.all(r => r.passed)
+}
+
+-- ---- A2A round-trip boundary ----
+
+-- operon-ai's A2A transport envelope. No operon-ai library spec exists
+-- to import, so this stays an ungoverned external reference by design
+-- (the checker's missingSourceHint warning is expected and accurate).
+external entity A2APart {}
+
+contract A2ACertificateCodec {
+    to_part: (cert: Certificate) -> A2APart
+    from_part: (part: A2APart) -> Certificate
+
+    @invariant Roundtrip
+        -- For every certificate either gate emits, under the pinned
+        -- operon-ai range, from_part(to_part(c)) yields a certificate
+        -- whose verify() result (`holds`) equals c.holds and whose
+        -- parameters are preserved exactly. Tightening the operon-ai
+        -- version pin requires re-checking this invariant.
+}
