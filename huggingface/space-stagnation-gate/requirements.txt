@@ -4,7 +4,7 @@
 # on deploy, so UI/API regressions that only show up on the deployed
 # version can't pass locally. If this bumps, bump the frontmatter too.
 gradio==6.12.0
-# Pinned to v0.1.0 stable; ``integrals_for()`` (used by the gate-trace
+# Pinned to v0.1.1 stable; ``integrals_for()`` (used by the gate-trace
 # panel) remains in the public API. Bump in lockstep with app.py whenever
 # the Space starts calling a newer API.
-operon-langgraph-gates==0.1.0
+operon-langgraph-gates==0.1.1
