@@ -8,20 +8,64 @@ Pre-1.0.0 alpha releases follow [PEP 440](https://peps.python.org/pep-0440/).
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-05-20
+
+**Maintenance release.** Strengthens the cross-repo binding contract with a
+machine-checked Allium specification and propagated param-shape tests (PR #24),
+and documents the supported sibling-adapter consumption contract that
+`operon-ai`'s `TestOperonLanggraphGatesDogfood`
+([operon-ai #182](https://github.com/coredipper/operon/pull/182)) enforces in
+CI. Public API surface unchanged from `v0.1.0`; **no breaking changes**.
+
+### Added
+
+- `specs/certificate-binding.allium` — machine-checked Allium specification of
+  the certificate binding (sum-type `Certificate` with `Stagnation` /
+  `Integrity` variants, replay-equivalence invariants, A2A round-trip as a
+  `contract` with `@invariant Roundtrip`). `allium check` 0 errors / 0
+  findings; `allium analyse` 0 process findings. One by-design
+  `missingSourceHint` warning for external `A2APart` (no `operon-ai` library
+  spec to import — documented in-spec, not faked).
+- `tests/test_certificate_binding_contract.py` — six assertion-based tests
+  closing the one gap surfaced by `allium propagate`: the exact emitted
+  parameter-dict shape. A regression that adds/renames a param key or flips
+  `all_passed` passes every existing test yet breaks the cross-repo
+  consumption contract that `operon-ai` adapters depend on. Same "exactly
+  these fields, no more / no less" discipline as the operon-side v0.2 dogfood
+  contract.
+
 ### Documentation
 
-- README: new *Sibling-adapter consumption contract (enforced cross-repo)*
+- README *Scope (normative)* section now points at the Allium spec +
+  binding-contract tests as the authoritative declaration of the cross-package
+  contract.
+- README new *Sibling-adapter consumption contract (enforced cross-repo)*
   subsection. Names the supported downstream contract (the two public
   theorem-name constants + the `operon_langgraph_gates.integrity` import
   side-effect) and points at its cross-repo enforcement —
   `operon-ai`'s `TestOperonLanggraphGatesDogfood`
-  ([operon-ai #182](https://github.com/coredipper/operon/pull/182)),
-  which installs this package in CI and asserts a full
-  serialize → deserialize → `verify()` round-trip.
+  ([operon-ai #182](https://github.com/coredipper/operon/pull/182)), which
+  installs this package in CI and asserts a full serialize → deserialize →
+  `verify()` round-trip.
+- README new *Positioning vs. Meng et al. (2026)* section: positions
+  `operon-langgraph-gates` against Meng et al.'s six-component harness
+  taxonomy (`H = (E, T, C, S, L, V)`) and Harness Completeness Matrix scoring
+  LangGraph at `E✓ T≈ C≈ S≈ L✗ V✗`. Documents the package as an ecosystem
+  complement filling the `L` (Lifecycle Hooks) and `V` (Evaluation Interface)
+  gaps at wrapped-node boundaries; replacing LangGraph orchestration is an
+  explicit non-goal.
+- README copy edits: anticipatory alpha-series phrasing replaced with
+  shipped-stable phrasing now that the package is past the alpha-1 / alpha-2
+  / stable arc.
 
-_Docs-only; no functional change to the package. The `0.1.x` public
-surface is unchanged, so this does not warrant a release (per the
-"0.2.0 = breaking changes" policy in the README Public API section)._
+### Chore
+
+- HuggingFace `space-stagnation-gate` `requirements.txt` pin flipped from a
+  development reference to `operon-langgraph-gates==0.1.0` stable on PyPI.
+- Example notebooks (`examples/01_stagnation_breaks_loop.ipynb`,
+  `examples/02_integrity_catches_drift.ipynb`) re-rendered for `v0.1.0`
+  theorem names (post-`0.1.0a2` `behavioral_stability_windowed` rename),
+  ensuring the rendered outputs match the shipped public surface.
 
 ## [0.1.0] — 2026-04-30
 
@@ -151,7 +195,8 @@ to `0.2.0` per SemVer.
   DNA-repair integrity benchmarks); cert preservation framework from
   Paper 5 §3.
 
-[Unreleased]: https://github.com/coredipper/operon-langgraph-gates/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/coredipper/operon-langgraph-gates/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/coredipper/operon-langgraph-gates/releases/tag/v0.1.1
 [0.1.0]: https://github.com/coredipper/operon-langgraph-gates/releases/tag/v0.1.0
 [0.1.0a2]: https://github.com/coredipper/operon-langgraph-gates/releases/tag/v0.1.0a2
 [0.1.0a1]: https://github.com/coredipper/operon-langgraph-gates/releases/tag/v0.1.0a1

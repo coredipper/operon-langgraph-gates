@@ -171,7 +171,7 @@ Anything underscore-prefixed is **internal** and may change without notice withi
 
 ## Status
 
-**Beta — `0.1.0`.** First stable release. Public surface is documented in the section above; `0.1.x` patches preserve it, breaking changes increment to `0.2.0` per [SemVer](https://semver.org/). The cross-repo A2A binding is enforced under the pinned `operon-ai>=0.36.1,<0.40` range. Feedback welcome via Issues.
+**Beta — `0.1.1`.** Patch release on the `0.1.x` line (first stable `0.1.0` shipped 2026-04-30); the public surface documented above is preserved. Breaking changes increment to `0.2.0` per [SemVer](https://semver.org/). The cross-repo A2A binding is enforced under the pinned `operon-ai>=0.36.1,<0.40` range and additionally specified machine-checked in `specs/certificate-binding.allium`. Feedback welcome via Issues.
 
 ## License
 
