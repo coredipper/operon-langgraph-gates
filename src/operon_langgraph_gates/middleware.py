@@ -47,10 +47,27 @@ from langchain_core.messages import AIMessage, BaseMessage
 from operon_ai.core.certificate import Certificate
 from operon_ai.health.epiplexity import EmbeddingProvider
 
-from ._common import EPHEMERAL_THREAD, _extract_thread_id
+from ._common import EPHEMERAL_THREAD
 from .stagnation import StagnationGate
 
 MessageText = Callable[[BaseMessage], str]
+
+
+def _runtime_thread_id(runtime: Any) -> str:
+    """Resolve the LangGraph thread id from a middleware ``Runtime``.
+
+    The ``Runtime`` passed to middleware hooks exposes thread identity via
+    ``runtime.execution_info.thread_id`` — it has **no** ``.config`` attribute,
+    unlike the ``RunnableConfig`` dict injected into plain graph nodes (which is
+    what ``_common.thread_id`` reads for the gate's ``wrap`` / ``edge`` path).
+    Using the node-style extraction here would silently collapse every
+    observation into the ephemeral bucket and leak stagnation state across
+    threads/runs. Falls back to the ephemeral thread when no id is present
+    (e.g. an agent invoked without a checkpointer / ``thread_id``).
+    """
+    execution_info = getattr(runtime, "execution_info", None)
+    thread_id = getattr(execution_info, "thread_id", None)
+    return thread_id if thread_id else EPHEMERAL_THREAD
 
 
 def _default_message_text(message: BaseMessage) -> str:
@@ -131,7 +148,7 @@ class StagnationMiddleware(AgentMiddleware):
         if not messages:
             return None
         text = self._message_text(messages[-1])
-        thread_id = _extract_thread_id(runtime) or EPHEMERAL_THREAD
+        thread_id = _runtime_thread_id(runtime)
         if self._gate.observe(text, thread_id=thread_id):
             return {
                 "jump_to": "end",

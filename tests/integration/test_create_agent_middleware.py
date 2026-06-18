@@ -18,9 +18,11 @@ from langchain_core.language_models.chat_models import BaseChatModel  # noqa: E4
 from langchain_core.messages import AIMessage  # noqa: E402
 from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
 from langchain_core.tools import tool  # noqa: E402
+from langgraph.checkpoint.memory import InMemorySaver  # noqa: E402
 from langgraph.errors import GraphRecursionError  # noqa: E402
 
 from operon_langgraph_gates import StagnationMiddleware  # noqa: E402
+from operon_langgraph_gates._common import EPHEMERAL_THREAD  # noqa: E402
 
 
 class _LoopingModel(BaseChatModel):
@@ -96,3 +98,34 @@ def test_middleware_certificate_matches_gate_path() -> None:
     agent.invoke(_user_input(), {"recursion_limit": 25})
 
     assert guard.certificates[0].theorem == STAGNATION_THEOREM
+
+
+def test_observations_are_scoped_per_thread_not_leaked() -> None:
+    """Regression for roborev #1258: the middleware ``Runtime`` exposes the
+    thread id at ``runtime.execution_info.thread_id`` (it has no ``.config``).
+    Observations must land under the real ``thread_id`` — not collapse into the
+    shared ephemeral bucket — so state does not leak across agent threads/runs.
+    """
+    guard = StagnationMiddleware(threshold=0.2, critical_duration=2, window_size=3)
+    agent = create_agent(
+        model=_LoopingModel(),
+        tools=[query_databricks],
+        middleware=[guard],
+        checkpointer=InMemorySaver(),
+    )
+
+    cfg_a = {"recursion_limit": 25, "configurable": {"thread_id": "thread-a"}}
+    cfg_b = {"recursion_limit": 25, "configurable": {"thread_id": "thread-b"}}
+    agent.invoke(_user_input(), cfg_a)
+    agent.invoke(_user_input(), cfg_b)
+
+    gate = guard.gate
+    # Each thread has its own observation history...
+    assert gate.integrals_for("thread-a"), "thread-a must have its own history"
+    assert gate.integrals_for("thread-b"), "thread-b must have its own history"
+    # ...and is independently flagged stagnant (state is not shared).
+    assert gate.is_stagnant_for("thread-a") is True
+    assert gate.is_stagnant_for("thread-b") is True
+    # The ephemeral bucket stays empty: nothing leaked into it (this is exactly
+    # what failed before the fix, when every observation collapsed there).
+    assert gate.integrals_for(EPHEMERAL_THREAD) == []
