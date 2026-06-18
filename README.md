@@ -51,6 +51,33 @@ certs = gate.certificates
 
 Backed by [Paper 4 §4.3](https://github.com/coredipper/operon/blob/main/article/paper4/main.pdf): convergence/false-stagnation accuracy **0.960** with real sentence embeddings (all-MiniLM-L6-v2, N = 300 trials). See [`docs/paper-citations.md`](./docs/paper-citations.md) for the full citation record, including the loop-detection caveat and a pointer to the archived benchmark data.
 
+### Break loops inside `create_agent` (`StagnationMiddleware`)
+
+`wrap` / `edge` attach to a `StateGraph` you build. For LangChain's prebuilt
+`create_agent` (the setup in issue #6731) the graph is internal — there's no node
+seam — so use the middleware adapter instead. It runs the same detection engine
+on each model output and halts the loop with `jump_to="end"` once the agent's
+output stagnates (the repeated failing tool call in #6731).
+
+```bash
+pip install operon-langgraph-gates[langchain]
+```
+
+```python
+from langchain.agents import create_agent
+from operon_langgraph_gates import StagnationMiddleware
+
+guard = StagnationMiddleware(threshold=0.2, critical_duration=2)
+agent = create_agent(model=llm, tools=[...], middleware=[guard])
+
+result = agent.invoke({"messages": [{"role": "user", "content": "..."}]})
+# Same replayable certificate as the StateGraph gate, on first detection:
+certs = guard.certificates  # -> behavioral_stability_windowed
+```
+
+Runnable end-to-end (no API key) in
+[`examples/03_stagnation_middleware_create_agent.ipynb`](./examples/03_stagnation_middleware_create_agent.ipynb).
+
 ### Catch state drift (`IntegrityGate`)
 
 ```python

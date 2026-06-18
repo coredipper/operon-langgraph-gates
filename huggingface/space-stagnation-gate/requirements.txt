@@ -4,7 +4,10 @@
 # on deploy, so UI/API regressions that only show up on the deployed
 # version can't pass locally. If this bumps, bump the frontmatter too.
 gradio==6.12.0
-# Pinned to v0.1.1 stable; ``integrals_for()`` (used by the gate-trace
-# panel) remains in the public API. Bump in lockstep with app.py whenever
-# the Space starts calling a newer API.
-operon-langgraph-gates==0.1.1
+# Tracks the v0.2.0 release that ships the create_agent adapter
+# (StagnationMiddleware) and the #6731 "tool_retry" preset narration.
+# app.py itself still only uses StagnationGate + ``integrals_for()`` (both
+# public since v0.1.x), so the Space is functionally compatible with 0.1.1
+# too. Deploy ordering: only redeploy the Space *after* 0.2.0 is published
+# to PyPI, or this pin will fail to resolve on the HF build.
+operon-langgraph-gates==0.2.0

@@ -68,11 +68,12 @@ NB1_CELLS = [
     """),
     _code("""
         import sys
-        import langgraph
+        from importlib.metadata import version
+
         import operon_langgraph_gates as olg
 
         print(f"Python     : {sys.version.split()[0]}")
-        print(f"langgraph  : {getattr(langgraph, '__version__', 'unknown')}")
+        print(f"langgraph  : {version('langgraph')}")
         print(f"olg        : {olg.__version__}")
     """),
     _md("""
@@ -209,11 +210,12 @@ NB2_CELLS = [
     """),
     _code("""
         import sys
-        import langgraph
+        from importlib.metadata import version
+
         import operon_langgraph_gates as olg
 
         print(f"Python     : {sys.version.split()[0]}")
-        print(f"langgraph  : {getattr(langgraph, '__version__', 'unknown')}")
+        print(f"langgraph  : {version('langgraph')}")
         print(f"olg        : {olg.__version__}")
     """),
     _md("""
@@ -354,6 +356,175 @@ NB2_CELLS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# 03 — Stagnation breaks a create_agent loop (middleware adapter)
+# ---------------------------------------------------------------------------
+
+NB3_CELLS = [
+    _md("""
+        # Breaking a `create_agent` loop with `StagnationMiddleware`
+
+        [LangGraph issue #6731](https://github.com/langchain-ai/langgraph/issues/6731)
+        was reported against LangChain's prebuilt **`create_agent`**: the model
+        kept re-issuing the *same failing tool call* (a Databricks query that
+        errored with `[REQUIRES_SINGLE_PART_NAMESPACE]`) until the recursion
+        limit fired, burning tokens the whole way.
+
+        `StagnationGate`'s `wrap` / `edge` API attaches to a `StateGraph` *you*
+        build — but `create_agent` builds its graph internally, so there is no
+        node seam to attach to. `StagnationMiddleware` is the adapter: it
+        implements LangChain's `after_model` hook, measures each model output,
+        and once the output stagnates it halts the loop with `jump_to="end"` and
+        emits the same `behavioral_stability_windowed` certificate.
+
+        **Honest scope:** the gate is strongest on verbatim / near-verbatim
+        repetition — which is exactly the shape of this loop (the agent proposes
+        the *identical* failing call every turn). For subtler drift, pair it with
+        a tool-call limit. This notebook runs with **no API key**: a tiny
+        deterministic model stands in for the LLM so the pathology is fully
+        reproducible.
+
+        Requires the `langchain` extra: `pip install operon-langgraph-gates[langchain]`.
+    """),
+    _code("""
+        import sys
+        from importlib.metadata import version
+
+        import operon_langgraph_gates as olg
+
+        print(f"Python     : {sys.version.split()[0]}")
+        print(f"langchain  : {version('langchain')}")
+        print(f"langgraph  : {version('langgraph')}")
+        print(f"olg        : {olg.__version__}")
+    """),
+    _md("""
+        ## A deterministic stand-in for the #6731 agent
+
+        `create_agent` drives a model → tool → model loop. To reproduce the
+        pathology without an API key, we use a model that always proposes the
+        **same** tool call, and a tool that always returns the **same** error —
+        the exact "futile retry" loop from the issue. Nothing here is random.
+    """),
+    _code("""
+        from langchain_core.language_models.chat_models import BaseChatModel
+        from langchain_core.messages import AIMessage
+        from langchain_core.outputs import ChatGeneration, ChatResult
+        from langchain_core.tools import tool
+
+
+        class LoopingModel(BaseChatModel):
+            \"\"\"Always proposes the same failing tool call (stands in for the LLM).\"\"\"
+
+            n: int = 0
+
+            @property
+            def _llm_type(self) -> str:
+                return "looping-fake"
+
+            def bind_tools(self, tools, **kwargs):  # noqa: ANN001, ANN003, ANN201
+                return self  # the call is hardcoded; we ignore the bound tools
+
+            def _generate(self, messages, stop=None, run_manager=None, **kwargs):  # noqa: ANN001, ANN003, ANN201
+                self.n += 1
+                message = AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "query_databricks",
+                            "args": {"sql": "SELECT * FROM sales"},
+                            "id": f"call_{self.n}",
+                        }
+                    ],
+                )
+                return ChatResult(generations=[ChatGeneration(message=message)])
+
+
+        @tool
+        def query_databricks(sql: str) -> str:
+            \"\"\"Run a SQL query against Databricks.\"\"\"
+            return "[REQUIRES_SINGLE_PART_NAMESPACE] Catalog/schema not allowed here."
+    """),
+    _md("""
+        ## Baseline — `create_agent` loops to the recursion limit
+
+        Wire the model and tool into `create_agent` and invoke with a small
+        `recursion_limit`. With no early exit, the agent burns calls until
+        LangGraph raises `GraphRecursionError` — issue #6731, reproduced live.
+    """),
+    _code("""
+        from langchain.agents import create_agent
+        from langgraph.errors import GraphRecursionError
+
+        baseline = create_agent(model=LoopingModel(), tools=[query_databricks])
+
+        try:
+            baseline.invoke(
+                {"messages": [{"role": "user", "content": "get the sales rows"}]},
+                {"recursion_limit": 8},
+            )
+        except GraphRecursionError:
+            print("GraphRecursionError fired — the agent looped until the limit (#6731)")
+    """),
+    _md("""
+        ## With `StagnationMiddleware` — same agent, one middleware, terminates
+
+        The only change is `middleware=[StagnationMiddleware(...)]`. After each
+        model call the middleware measures the output; once the same failing
+        call repeats, it routes the agent to `end` with a graceful message
+        instead of looping. Detection and certificate emission are delegated to
+        an internal `StagnationGate` — same engine as the `StateGraph` notebook.
+    """),
+    _code("""
+        from operon_langgraph_gates import StagnationMiddleware
+
+        guard = StagnationMiddleware(threshold=0.2, critical_duration=2, window_size=3)
+        guarded = create_agent(
+            model=LoopingModel(),
+            tools=[query_databricks],
+            middleware=[guard],
+        )
+
+        result = guarded.invoke(
+            {"messages": [{"role": "user", "content": "get the sales rows"}]},
+            {"recursion_limit": 25},
+        )
+        print(f"final message: {result['messages'][-1].content}")
+    """),
+    _md("""
+        ## Inspect the certificate
+
+        On the turn where stagnation was first detected, the middleware emits one
+        `behavioral_stability_windowed` certificate onto
+        `middleware.certificates` — the *same* replayable artifact the
+        `StateGraph` gate produces. `cert.verify()` replays the saved evidence;
+        for a stagnation cert, `holds == False`.
+    """),
+    _code("""
+        assert len(guard.certificates) == 1, "expected exactly one certificate"
+        cert = guard.certificates[0]
+        print(f"theorem    : {cert.theorem}")
+        print(f"source     : {cert.source}")
+        print(f"conclusion : {cert.conclusion}")
+
+        verification = cert.verify()
+        print(f"verify.holds: {verification.holds}")
+        print(f"verify.evidence: {verification.evidence}")
+    """),
+    _md("""
+        ## Takeaway
+
+        One middleware turned a `create_agent` loop-until-crash into a routed
+        exit with a replayable evidence artifact — no rewrite of the agent, no
+        access to its internal graph. This is the prebuilt-agent counterpart to
+        `01_stagnation_breaks_loop.ipynb`, which attaches the same gate to a
+        `StateGraph` you own via `gate.wrap` / `gate.edge`.
+
+        Use the middleware when you're on `create_agent` / `create_react_agent`;
+        use the gate directly when you build the graph yourself.
+    """),
+]
+
+
 def _write(path: Path, cells: list[nbformat.NotebookNode], id_prefix: str) -> None:
     _assign_stable_ids(cells, id_prefix)
     nb = new_notebook(cells=cells)
@@ -442,6 +613,7 @@ def main() -> None:
     paths = [
         (EXAMPLES / "01_stagnation_breaks_loop.ipynb", NB1_CELLS, "stagnation"),
         (EXAMPLES / "02_integrity_catches_drift.ipynb", NB2_CELLS, "integrity"),
+        (EXAMPLES / "03_stagnation_middleware_create_agent.ipynb", NB3_CELLS, "middleware"),
     ]
     for path, cells, prefix in paths:
         _write(path, cells, id_prefix=prefix)

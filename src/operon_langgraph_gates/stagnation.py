@@ -166,6 +166,22 @@ class StagnationGate:
         else:
             self._threads.pop(thread_id, None)
 
+    def observe(self, text: str, *, thread_id: str | None = None) -> bool:
+        """Feed one text observation directly and return the thread's stagnation state.
+
+        This is the seam for callers that drive detection from something other
+        than a wrapped node's return value — notably the ``create_agent``
+        adapter in :mod:`operon_langgraph_gates.middleware`, which observes each
+        model-output message instead of a LangGraph node output. It runs the
+        same measurement + certificate-emission path as :meth:`wrap`.
+
+        ``thread_id is None`` targets the ephemeral default thread, matching
+        :attr:`is_stagnant` semantics for single-thread callers.
+        """
+        tid = EPHEMERAL_THREAD if thread_id is None else thread_id
+        self._observe(text, tid)
+        return self.is_stagnant_for(tid)
+
     def wrap(self, fn: NodeFn, *, text_extractor: TextExtractor | None = None) -> NodeFn:
         """Wrap a LangGraph node function with stagnation measurement.
 
