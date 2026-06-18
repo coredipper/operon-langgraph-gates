@@ -79,10 +79,18 @@ def test_slow_drift_preset_fires_after_warmup() -> None:
     assert flips[-1], f"slow-drift must end in stagnation; trajectory={flips}"
 
 
+def test_tool_retry_preset_fires_within_6_turns() -> None:
+    """The #6731 preset (same failing tool call every turn) must trip the gate."""
+    mod = _load_scenarios()
+    scenario = mod.TOOL_RETRY_LOOP  # type: ignore[attr-defined]
+    _, flips = _replay(scenario.outputs)
+    assert any(flips[:6]), f"expected stagnation by turn 6; trajectory={flips}"
+
+
 def test_all_presets_registered_in_scenarios_dict() -> None:
     mod = _load_scenarios()
     registered = mod.SCENARIOS  # type: ignore[attr-defined]
-    expected_keys = {"identical", "diverse", "noisy_repeat", "slow_drift"}
+    expected_keys = {"identical", "diverse", "noisy_repeat", "slow_drift", "tool_retry"}
     assert set(registered.keys()) == expected_keys
     for key, scenario in registered.items():
         assert scenario.key == key

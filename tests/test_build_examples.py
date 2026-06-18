@@ -48,6 +48,26 @@ def test_integrity_cells_have_stable_ids(builder: object) -> None:
     assert [c["id"] for c in cells] == [f"integrity-{i:02d}" for i in range(len(cells))]
 
 
+def test_middleware_cells_have_stable_ids(builder: object) -> None:
+    cells = list(builder.NB3_CELLS)  # type: ignore[attr-defined]
+    builder._assign_stable_ids(cells, "middleware")  # type: ignore[attr-defined]
+    assert [c["id"] for c in cells] == [f"middleware-{i:02d}" for i in range(len(cells))]
+
+
+def test_middleware_example_uses_create_agent_and_middleware(builder: object) -> None:
+    """NB3 must demonstrate the create_agent + StagnationMiddleware path and
+    reproduce the #6731 loop (GraphRecursionError baseline)."""
+    code = "\n".join(
+        c["source"]
+        for c in builder.NB3_CELLS  # type: ignore[attr-defined]
+        if c["cell_type"] == "code"
+    )
+    assert "create_agent" in code
+    assert "StagnationMiddleware" in code
+    assert "GraphRecursionError" in code
+    assert "query_databricks" in code
+
+
 def test_id_assignment_is_idempotent(builder: object) -> None:
     """Running the ID assignment twice on independent copies produces
     the same IDs — proves regeneration is a no-op on IDs rather than

@@ -8,6 +8,38 @@ Pre-1.0.0 alpha releases follow [PEP 440](https://peps.python.org/pep-0440/).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-18
+
+**Feature release.** Adds a `create_agent` adapter so the stagnation gate works
+inside LangChain's prebuilt agents — the exact setup reported in
+[LangGraph issue #6731](https://github.com/langchain-ai/langgraph/issues/6731),
+where a `create_agent` agent re-issues the same failing tool call until the
+recursion limit. The gate's `wrap` / `edge` API only attaches to a `StateGraph`
+you build; the new middleware bridges to prebuilt agents whose graph is internal.
+**No breaking changes** — additive surface only.
+
+### Added
+
+- `operon_langgraph_gates.middleware.StagnationMiddleware` — a LangChain v1
+  `AgentMiddleware` that observes each model output via the `after_model` hook
+  and, once the output stagnates, halts the agent loop with `jump_to="end"` and
+  emits the same `behavioral_stability_windowed` certificate as the gate.
+  Detection/state/certificate emission are delegated to an internal
+  `StagnationGate` (no duplicated logic). Available via the convenience import
+  `from operon_langgraph_gates import StagnationMiddleware` (lazy; raises a
+  friendly error if the extra is missing).
+- `StagnationGate.observe(text, *, thread_id=None) -> bool` — public seam to
+  feed one text observation directly (the middleware's driver), running the same
+  measurement path as `wrap`.
+- `langchain` optional extra (`pip install operon-langgraph-gates[langchain]`)
+  enabling the middleware. Core runtime deps are unchanged (`operon-ai`,
+  `langgraph`) so `StateGraph`-only users don't pull LangChain.
+- `examples/03_stagnation_middleware_create_agent.ipynb` — reproduces #6731 with
+  a real `create_agent` (deterministic stand-in model, no API key) and breaks the
+  loop with `StagnationMiddleware`.
+- HuggingFace demo Space: a `tool_retry` preset that mirrors the #6731
+  failing-tool retry loop, plus an explicit `python_version` in the Space config.
+
 ## [0.1.1] — 2026-05-20
 
 **Maintenance release.** Strengthens the cross-repo binding contract with a

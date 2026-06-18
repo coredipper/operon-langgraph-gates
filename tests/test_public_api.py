@@ -7,6 +7,8 @@ public-API stability assertions (Wave 2 of the un-alpha track).
 
 from __future__ import annotations
 
+import pytest
+
 import operon_langgraph_gates as olg
 
 
@@ -37,3 +39,26 @@ def test_theorem_constants_match_internal_ssot() -> None:
 
     assert stagnation_internal == olg.STAGNATION_THEOREM
     assert integrity_internal == olg.INTEGRITY_THEOREM
+
+
+def test_stagnation_gate_observe_is_public() -> None:
+    """``observe`` is the public seam the create_agent middleware drives."""
+    assert callable(olg.StagnationGate.observe)
+
+
+def test_stagnation_middleware_not_in_all_but_lazily_importable() -> None:
+    """The middleware needs the optional ``langchain`` extra, so it is kept out
+    of ``__all__`` (``import *`` must stay langchain-free) yet remains importable
+    via the explicit convenience path and the canonical submodule path."""
+    assert "StagnationMiddleware" not in olg.__all__
+
+    pytest.importorskip("langchain")
+    from operon_langgraph_gates.middleware import StagnationMiddleware
+
+    assert olg.StagnationMiddleware is StagnationMiddleware
+
+
+def test_unknown_attribute_raises_attribute_error() -> None:
+    """The package ``__getattr__`` must not swallow genuinely missing names."""
+    with pytest.raises(AttributeError):
+        olg.DefinitelyNotAThing  # noqa: B018

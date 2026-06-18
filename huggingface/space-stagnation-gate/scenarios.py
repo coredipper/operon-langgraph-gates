@@ -115,6 +115,38 @@ SLOW_DRIFT = Scenario(
 )
 
 
+TOOL_RETRY_LOOP = Scenario(
+    key="tool_retry",
+    label="Failing tool retry loop (gate fires) — issue #6731",
+    short_description="Agent re-issues the same failing tool call every turn.",
+    narration=(
+        "The exact pathology from LangGraph issue #6731: a prebuilt agent "
+        "(`create_agent`) keeps proposing the *same* failing Databricks query "
+        "and getting the *same* `[REQUIRES_SINGLE_PART_NAMESPACE]` error, "
+        "burning tokens until the recursion limit. The model output is "
+        "near-verbatim every turn, so the epiplexic integral collapses and the "
+        "gate flips ``is_stagnant=True`` around turn 6 — the point where "
+        "``StagnationMiddleware`` would route the agent to ``end``. See "
+        "``examples/03_stagnation_middleware_create_agent.ipynb`` for the "
+        "runnable create_agent version."
+    ),
+    outputs=tuple(
+        [
+            "query_databricks(sql='SELECT * FROM sales') -> "
+            "[REQUIRES_SINGLE_PART_NAMESPACE] catalog/schema not allowed"
+        ]
+        * 8
+    ),
+)
+
+
 SCENARIOS: dict[str, Scenario] = {
-    s.key: s for s in (IDENTICAL_OUTPUTS, DIVERSE_OUTPUTS, NEAR_IDENTICAL_WITH_NOISE, SLOW_DRIFT)
+    s.key: s
+    for s in (
+        IDENTICAL_OUTPUTS,
+        DIVERSE_OUTPUTS,
+        NEAR_IDENTICAL_WITH_NOISE,
+        SLOW_DRIFT,
+        TOOL_RETRY_LOOP,
+    )
 }
